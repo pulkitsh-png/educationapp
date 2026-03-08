@@ -2059,55 +2059,68 @@ function compressCanvas(canvas, maxB64Bytes) {
   return b64.replace(/[\s\r\n]/g, "");
 }
 
+function drawBitmapToB64(bitmap) {
+  var MAX = 800;
+  var w = bitmap.width, h = bitmap.height;
+  if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+  if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+  var canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  var ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  var b64 = compressCanvas(canvas, 900000);
+  dbg("Photo compressed", {w:w, h:h, kb: Math.round(b64.length/1024)+"KB", prefix: b64.slice(0,6)});
+  return b64;
+}
+
 function convertToJpeg(file, callback) {
-  var reader = new FileReader();
-  reader.onload = function(ev) {
-    var dataUrl = ev.target.result;
-    var img = new Image();
-    img.onload = function() {
-      var MAX = 800;
-      var w = img.width, h = img.height;
-      if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
-      if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
-      var canvas = document.createElement("canvas");
-      canvas.width = w; canvas.height = h;
-      var ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, w, h);
-      ctx.drawImage(img, 0, 0, w, h);
-      var b64 = compressCanvas(canvas, 900000);
-      dbg("Photo ready (canvas)", {w:w, h:h, kb: Math.round(b64.length/1024)+"KB", prefix: b64.slice(0,8)});
-      callback("image/jpeg", b64, "data:image/jpeg;base64,"+b64);
+  var isHeic = file.type === "image/heic" || file.type === "image/heif" ||
+               file.name && /\.hei[cf]$/i.test(file.name);
+
+  function processBlob(blob) {
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var dataUrl = ev.target.result;
+      var img = new Image();
+      img.onload = function() {
+        var b64 = drawBitmapToB64(img);
+        callback("image/jpeg", b64, "data:image/jpeg;base64,"+b64);
+      };
+      img.onerror = function() {
+        if (window.createImageBitmap) {
+          createImageBitmap(blob).then(function(bm) {
+            var b64 = drawBitmapToB64(bm);
+            callback("image/jpeg", b64, "data:image/jpeg;base64,"+b64);
+          }).catch(function(e) {
+            dbg("createImageBitmap failed: "+e.message);
+            showGenError("Cannot process this image. Please use JPEG format.");
+          });
+        } else {
+          showGenError("Cannot process this image. Please use JPEG format.");
+        }
+      };
+      img.src = dataUrl;
     };
-    img.onerror = function() {
-      dbg("img.onload failed - trying createImageBitmap (HEIC?)");
-      if (window.createImageBitmap) {
-        createImageBitmap(file).then(function(bitmap) {
-          var MAX = 800;
-          var w = bitmap.width, h = bitmap.height;
-          if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
-          if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
-          var canvas = document.createElement("canvas");
-          canvas.width = w; canvas.height = h;
-          var ctx = canvas.getContext("2d");
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(0, 0, w, h);
-          ctx.drawImage(bitmap, 0, 0, w, h);
-          var b64 = compressCanvas(canvas, 900000);
-          dbg("Photo ready (bitmap)", {w:w, h:h, kb: Math.round(b64.length/1024)+"KB", prefix: b64.slice(0,8)});
-          callback("image/jpeg", b64, "data:image/jpeg;base64,"+b64);
-        }).catch(function(e) {
-          dbg("Both methods failed: "+e.message);
-          showGenError("Could not process image. Try a JPEG photo instead of HEIC.");
-        });
-      } else {
-        dbg("No createImageBitmap available");
-        showGenError("Could not process this image format. Try saving as JPEG first.");
-      }
-    };
-    img.src = dataUrl;
-  };
-  reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
+  }
+
+  if (isHeic && window.heic2any) {
+    dbg("HEIC detected - converting with heic2any");
+    heic2any({ blob: file, toType: "image/jpeg", quality: 0.7 })
+      .then(function(jpegBlob) {
+        dbg("heic2any success, blob size: "+jpegBlob.size);
+        processBlob(jpegBlob);
+      })
+      .catch(function(e) {
+        dbg("heic2any failed: "+e.message+", trying direct");
+        processBlob(file);
+      });
+  } else {
+    if (isHeic) dbg("HEIC but no heic2any library - trying direct");
+    processBlob(file);
+  }
 }
 
 function processFile(file) {
