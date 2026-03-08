@@ -1048,7 +1048,7 @@ body::before{
       No credit card needed. Super fast inference.
     </p>
     <div class="input-row">
-      <div class="fg"><label>Gemini API Key</label><input type="password" id="api-key-input" placeholder="gsk_..."/></div>
+      <div class="fg"><label>Groq API Key</label><input type="password" id="api-key-input" placeholder="gsk_..."/></div>
       <button class="btn-save" onclick="saveKey()">Save</button>
       <button class="btn-save" onclick="testApiKey()" style="background:var(--teal);margin-left:8px;" id="test-key-btn">Test</button>
     </div>
@@ -1098,7 +1098,6 @@ body::before{
 </div><!-- /layout -->
 
 <script>
-functi
 function dbg(msg, data) {
   var log = document.getElementById("debug-log");
   if (!log) return;
@@ -2162,7 +2161,7 @@ function generateQs() {
   var url = "https://api.groq.com/openai/v1/chat/completions";
   dbg("Calling Groq API", url);
   dbg("Request body size (bytes)", bodyStr.length);
-  fetch(url, { method:"POST", headers:{ "content-type":"application/json", "authorization":"Bearer "+apiKey }, body:bodyStr })
+  fetch(url, { method:"POST", mode:"cors", headers:{ "content-type":"application/json", "authorization":"Bearer "+apiKey }, body:bodyStr })
   .then(function(resp) { return resp.text().then(function(txt) { return { status:resp.status, ok:resp.ok, txt:txt }; }); })
   .then(function(r) {
     dbg("HTTP status", r.status);
@@ -2353,7 +2352,8 @@ function testApiKey() {
   if (btn) btn.disabled = true;
   var testUrl = "https://api.groq.com/openai/v1/chat/completions";
   var testBody = JSON.stringify({ model:"meta-llama/llama-4-scout-17b-16e-instruct", messages:[{role:"user",content:"Reply with just the word OK"}], max_tokens:5 });
-  fetch(testUrl, { method:"POST", headers:{ "content-type":"application/json", "authorization":"Bearer "+key }, body:testBody })
+  dbg("testApiKey: key length="+key.length+", prefix="+key.slice(0,8));
+  fetch(testUrl, { method:"POST", mode:"cors", headers:{ "content-type":"application/json", "authorization":"Bearer "+key }, body:testBody })
   .then(function(resp) { return resp.text().then(function(txt) { return { status:resp.status, ok:resp.ok, txt:txt }; }); })
   .then(function(r) {
     if (btn) btn.disabled = false;
@@ -2369,7 +2369,9 @@ function testApiKey() {
   })
   .catch(function(e) {
     if (btn) btn.disabled = false;
-    if (resultEl) { resultEl.style.cssText="display:block;background:rgba(244,63,94,.1);border:1px solid #f43f5e;border-radius:10px;padding:12px;margin-top:10px;color:#f43f5e;font-size:.78rem;font-weight:700;"; resultEl.textContent="❌ Network error: "+e.message; }
+    var errMsg = "❌ Network error: "+e.message+" | name="+e.name+" | key_len="+(key?key.length:0)+" | origin="+window.location.origin;
+    dbg("FETCH ERROR", errMsg);
+    if (resultEl) { resultEl.style.cssText="display:block;background:rgba(244,63,94,.1);border:1px solid #f43f5e;border-radius:10px;padding:12px;margin-top:10px;color:#f43f5e;font-size:.78rem;font-weight:700;word-break:break-all;"; resultEl.textContent=errMsg; }
   });
 }
 
@@ -2549,7 +2551,8 @@ function renderSkillMastery() {
   });
   el.innerHTML = _smH;
 }
-t>
+
+</script>
 
 <!-- ══════════════ MOBILE BOTTOM NAV ══════════════ -->
 <div class="more-backdrop" id="more-backdrop" role="button" aria-label="Close menu" onclick="closeMoreMenu()"></div>
