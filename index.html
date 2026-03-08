@@ -2073,6 +2073,7 @@ function convertToJpeg(file, callback) {
         dataUrl = canvas.toDataURL("image/jpeg", quality);
         b64 = dataUrl.split(",")[1];
       }
+      b64 = b64.replace(/\s/g, "");
       dbg("Image compressed", {w:w, h:h, quality:quality, b64kb: Math.round(b64.length/1024)+"KB"});
       callback("image/jpeg", b64, dataUrl);
     };
@@ -2158,13 +2159,16 @@ function generateQs() {
     }
     dbg("Sending "+maxImgs+" images to Groq");
   } else {
-    contentArr.push({ type:"image_url", image_url:{ url:"data:image/jpeg;base64,"+_uploadB64 } });
+    var cleanB64 = (_uploadB64 || "").replace(/\s/g, "");
+    dbg("Single image b64 prefix", cleanB64.slice(0,30)+"...");
+    dbg("Single image b64 length", cleanB64.length);
+    contentArr.push({ type:"image_url", image_url:{ url:"data:image/jpeg;base64,"+cleanB64 } });
     dbg("Sending 1 image to Groq");
   }
   var bodyStr = JSON.stringify({
     model: "meta-llama/llama-4-scout-17b-16e-instruct",
     messages: [{ role:"user", content: contentArr }],
-    max_tokens: 4000,
+    max_completion_tokens: 2000,
     temperature: 0.4
   });
   var url = "https://api.groq.com/openai/v1/chat/completions";
