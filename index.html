@@ -670,6 +670,29 @@ body::before{
   .score-card{padding:16px;}
   .score-row{gap:12px;}
 }
+
+/* ── Select / Dropdown styling ── */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: #1a2d45;
+  color: #f0f6ff;
+  border: 1.5px solid rgba(148,163,184,.35);
+  border-radius: 9px;
+  padding: 9px 30px 9px 10px;
+  font-family: 'Nunito', sans-serif;
+  font-size: .82rem;
+  font-weight: 700;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238da3bb' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+select option {
+  background-color: #1a2d45;
+  color: #f0f6ff;
+}
+
 </style>
 </head>
 <body>
@@ -937,89 +960,113 @@ body::before{
 
 <!-- ▸ UPLOAD -->
 <div class="screen" id="sc-upload">
-  <div class="ph"><h1>📸 Upload & Generate</h1><p>Take a photo of any textbook page — AI builds NJSLA quiz questions automatically!</p></div>
-  <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;">
-    <div style="flex:1;min-width:120px;background:rgba(14,165,233,.1);border:2px solid rgba(14,165,233,.3);border-radius:12px;padding:10px 12px;text-align:center;">
-      <div style="font-size:1.3rem;">📷</div>
-      <div style="font-size:.72rem;font-weight:900;color:var(--teal);margin-top:3px;">STEP 1</div>
-      <div style="font-size:.75rem;font-weight:700;color:var(--text);margin-top:2px;">Take / Pick Photo</div>
+  <div class="ph"><h1>📸 Build Your Question Bank</h1><p>Upload one textbook page at a time → AI creates questions → Repeat for each page → Build your test!</p></div>
+
+  <!-- WIZARD PROGRESS BAR -->
+  <div id="upload-wizard" style="background:rgba(14,165,233,.07);border:1.5px solid rgba(14,165,233,.25);border-radius:16px;padding:16px;margin-bottom:18px;">
+    <div style="display:flex;align-items:center;gap:0;margin-bottom:10px;">
+      <div id="wiz-step1" style="flex:1;text-align:center;padding:8px 4px;border-radius:10px;background:rgba(14,165,233,.2);border:2px solid var(--teal);">
+        <div style="font-size:1.1rem;">📷</div>
+        <div style="font-size:.65rem;font-weight:900;color:var(--teal);margin-top:2px;">STEP 1</div>
+        <div style="font-size:.68rem;font-weight:700;color:var(--text);">Pick Photo</div>
+      </div>
+      <div style="font-size:1rem;color:var(--muted2);padding:0 5px;">→</div>
+      <div id="wiz-step2" style="flex:1;text-align:center;padding:8px 4px;border-radius:10px;background:rgba(255,255,255,.03);border:2px solid rgba(255,255,255,.1);">
+        <div style="font-size:1.1rem;">🧠</div>
+        <div style="font-size:.65rem;font-weight:900;color:var(--muted2);margin-top:2px;">STEP 2</div>
+        <div style="font-size:.68rem;font-weight:700;color:var(--muted2);">Generate</div>
+      </div>
+      <div style="font-size:1rem;color:var(--muted2);padding:0 5px;">→</div>
+      <div id="wiz-step3" style="flex:1;text-align:center;padding:8px 4px;border-radius:10px;background:rgba(255,255,255,.03);border:2px solid rgba(255,255,255,.1);">
+        <div style="font-size:1.1rem;">✅</div>
+        <div style="font-size:.65rem;font-weight:900;color:var(--muted2);margin-top:2px;">STEP 3</div>
+        <div style="font-size:.68rem;font-weight:700;color:var(--muted2);">Saved!</div>
+      </div>
+      <div style="font-size:1rem;color:var(--muted2);padding:0 5px;">→</div>
+      <div id="wiz-step4" style="flex:1;text-align:center;padding:8px 4px;border-radius:10px;background:rgba(255,255,255,.03);border:2px solid rgba(255,255,255,.1);">
+        <div style="font-size:1.1rem;">🔁</div>
+        <div style="font-size:.65rem;font-weight:900;color:var(--muted2);margin-top:2px;">REPEAT</div>
+        <div style="font-size:.68rem;font-weight:700;color:var(--muted2);">Next Page</div>
+      </div>
     </div>
-    <div style="flex:0;display:flex;align-items:center;font-size:1.2rem;color:var(--muted2);">→</div>
-    <div style="flex:1;min-width:120px;background:rgba(245,158,11,.1);border:2px solid rgba(245,158,11,.3);border-radius:12px;padding:10px 12px;text-align:center;">
-      <div style="font-size:1.3rem;">⚙️</div>
-      <div style="font-size:.72rem;font-weight:900;color:var(--amber);margin-top:3px;">STEP 2</div>
-      <div style="font-size:.75rem;font-weight:700;color:var(--text);margin-top:2px;">Pick Grade & Count</div>
+    <p id="wiz-hint" style="font-size:.8rem;font-weight:700;color:var(--teal);text-align:center;margin:0;">👆 Pick a photo of your textbook page to get started</p>
+  </div>
+
+  <!-- STEP 1: PHOTO PICKER -->
+  <div class="card" style="margin-bottom:14px;" id="photo-picker-card">
+    <div class="card-t">📷 Step 1 — Choose Your Textbook Photo</div>
+    <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" multiple onchange="handleFile(event)" style="display:none"/>
+    <input type="file" id="fileInputCamera" accept="image/jpeg,image/png,image/webp" capture="environment" onchange="handleFile(event)" style="display:none"/>
+    <input type="file" id="fileInputLibrary" accept="image/jpeg,image/png,image/webp" onchange="handleFile(event)" style="display:none"/>
+    <div style="display:flex;gap:10px;margin-bottom:12px;">
+      <button type="button" onclick="openCapture('environment')" style="flex:1;padding:13px;border-radius:12px;border:2px solid rgba(14,165,233,.4);background:rgba(14,165,233,.08);color:var(--teal);font-family:'Nunito',sans-serif;font-size:.88rem;font-weight:800;cursor:pointer;">
+        📷 Take Photo
+      </button>
+      <button type="button" onclick="openCapture('')" style="flex:1;padding:13px;border-radius:12px;border:2px solid rgba(245,158,11,.4);background:rgba(245,158,11,.08);color:var(--amber);font-family:'Nunito',sans-serif;font-size:.88rem;font-weight:800;cursor:pointer;">
+        🖼 Photo Library
+      </button>
     </div>
-    <div style="flex:0;display:flex;align-items:center;font-size:1.2rem;color:var(--muted2);">→</div>
-    <div style="flex:1;min-width:120px;background:rgba(168,85,247,.1);border:2px solid rgba(168,85,247,.3);border-radius:12px;padding:10px 12px;text-align:center;">
-      <div style="font-size:1.3rem;">🧠</div>
-      <div style="font-size:.72rem;font-weight:900;color:var(--purple);margin-top:3px;">STEP 3</div>
-      <div style="font-size:.75rem;font-weight:700;color:var(--text);margin-top:2px;">Tap Generate!</div>
+    <div class="upload-zone" id="upload-zone" onclick="document.getElementById('fileInput').click()" style="padding:14px;min-height:80px;cursor:pointer;">
+      <span class="uz-icon" style="font-size:1.8rem;">📖</span>
+      <p id="photo-count" style="color:var(--teal);font-size:.85rem;font-weight:700;margin:4px 0 2px;min-height:1.2em;"></p>
+      <p style="font-size:.72rem;margin:0;">Or drag &amp; drop a JPEG here (desktop)</p>
     </div>
-    <div style="flex:0;display:flex;align-items:center;font-size:1.2rem;color:var(--muted2);">→</div>
-    <div style="flex:1;min-width:120px;background:rgba(34,197,94,.1);border:2px solid rgba(34,197,94,.3);border-radius:12px;padding:10px 12px;text-align:center;">
-      <div style="font-size:1.3rem;">🎯</div>
-      <div style="font-size:.72rem;font-weight:900;color:var(--green);margin-top:3px;">STEP 4</div>
-      <div style="font-size:.75rem;font-weight:700;color:var(--text);margin-top:2px;">Start Quiz!</div>
+    <img id="preview-img" class="preview-img" style="display:none;max-width:100%;border-radius:10px;margin-top:10px;"/>
+  </div>
+
+  <!-- STEP 2: GENERATE BUTTON (big and obvious) -->
+  <div id="generate-action-card" class="card" style="margin-bottom:14px;border:2px solid rgba(168,85,247,.35);background:rgba(168,85,247,.05);">
+    <div class="card-t" style="color:var(--purple);">🧠 Step 2 — Generate Questions with AI</div>
+    <div id="gen-waiting-msg" style="text-align:center;padding:6px 0 10px;color:var(--muted2);font-size:.8rem;font-weight:700;">
+      ⬆️ Upload a photo above first, then come back here
+    </div>
+    <div id="gen-ready-msg" style="display:none;background:rgba(34,197,94,.09);border:1.5px solid rgba(34,197,94,.35);border-radius:11px;padding:10px 14px;margin-bottom:12px;text-align:center;">
+      <div style="font-size:.85rem;font-weight:900;color:var(--green);">✅ Photo ready! Hit the button below ↓</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:80px;">
+        <label style="font-size:.7rem;font-weight:800;color:var(--muted2);display:block;margin-bottom:4px;">GRADE</label>
+        <select id="g-grade" style="width:100%;padding:8px;border-radius:9px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:var(--text);font-size:.82rem;font-weight:700;"><option value="3">Grade 3</option><option value="4" selected>Grade 4</option><option value="5">Grade 5</option></select>
+      </div>
+      <div style="flex:1;min-width:80px;">
+        <label style="font-size:.7rem;font-weight:800;color:var(--muted2);display:block;margin-bottom:4px;">QUESTIONS</label>
+        <select id="g-num" style="width:100%;padding:8px;border-radius:9px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:var(--text);font-size:.82rem;font-weight:700;"><option value="5">5</option><option value="8">8</option><option value="10" selected>10</option><option value="15">15</option></select>
+      </div>
+      <div style="flex:1;min-width:80px;">
+        <label style="font-size:.7rem;font-weight:800;color:var(--muted2);display:block;margin-bottom:4px;">ALIGN</label>
+        <select id="g-align" style="width:100%;padding:8px;border-radius:9px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:var(--text);font-size:.82rem;font-weight:700;"><option value="njsla">NJSLA</option><option value="njmap">NJMAP</option><option value="both" selected>Both</option></select>
+      </div>
+    </div>
+    <button type="button" class="btn-gen" id="gen-btn" onclick="generateQs()" disabled style="width:100%;font-size:1.05rem;padding:16px;opacity:.35;transition:opacity .3s;">
+      🧠 Generate Questions with AI
+    </button>
+    <p style="font-size:.7rem;color:var(--muted2);font-weight:700;text-align:center;margin:7px 0 0;" id="gen-btn-hint">Upload a photo above to activate this button</p>
+  </div>
+
+  <!-- ERROR BOX -->
+  <div id="gen-error-box" style="display:none;margin-bottom:14px;background:rgba(244,63,94,.1);border:1.5px solid #f43f5e;border-radius:12px;padding:14px 16px;color:#f43f5e;font-size:.82rem;font-weight:700;line-height:1.7;word-break:break-word;"></div>
+
+  <!-- STEP 3: SUCCESS + NEXT ACTION -->
+  <div id="gen-success-card" style="display:none;" class="card">
+    <div class="card-t" style="color:var(--green);">✅ Questions Saved to Your Bank!</div>
+    <div id="gen-success-msg" style="text-align:center;padding:10px 0;font-size:.9rem;font-weight:700;color:var(--green);line-height:1.6;"></div>
+    <div style="display:flex;gap:10px;margin-top:4px;">
+      <button type="button" onclick="resetUploadForNext()" style="flex:1;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--teal),var(--purple));color:#fff;font-size:.85rem;font-weight:900;cursor:pointer;">
+        🔁 Upload Another Page
+      </button>
+      <button type="button" onclick="go('banks')" style="flex:1;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--green),var(--teal));color:#fff;font-size:.85rem;font-weight:900;cursor:pointer;">
+        🎯 Build My Test →
+      </button>
     </div>
   </div>
-  <div class="g2">
-    <div>
-      <div class="card" style="margin-bottom:15px;">
-        <div class="card-t">📷 Step 1 — Take or Pick Your Photo</div>
-        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('fileInput').click()">
-          <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" multiple onchange="handleFile(event)" style="display:none"/>
-          <span class="uz-icon">📖</span>
-          <h3>📸 Tap here — or use buttons below</h3>
-          <p id="photo-count" style="color:var(--teal);font-size:.85rem;font-weight:700;margin:6px 0 0;min-height:1.2em;"></p>
-          <p>iPhone: Camera or Photos · Desktop: drag &amp; drop</p>
-        </div>
-        <!-- Mobile: explicit camera/library buttons -->
-        <div class="upload-btns" style="display:flex;gap:10px;margin-top:12px;">
-          <button onclick="openCapture('environment')" style="flex:1;padding:12px;border-radius:12px;border:1.5px solid rgba(14,165,233,.4);background:rgba(14,165,233,.07);color:var(--teal);font-family:'Nunito',sans-serif;font-size:.85rem;font-weight:800;cursor:pointer;">
-            📷 Take Photo
-          </button>
-          <button onclick="openCapture('')" style="flex:1;padding:12px;border-radius:12px;border:1.5px solid rgba(245,158,11,.4);background:rgba(245,158,11,.07);color:var(--amber);font-family:'Nunito',sans-serif;font-size:.85rem;font-weight:800;cursor:pointer;">
-            🖼️ Photo Library
-          </button>
-        </div>
-        <input type="file" id="fileInputCamera" accept="image/jpeg,image/png,image/webp" capture="environment" onchange="handleFile(event)" style="display:none"/>
-        <input type="file" id="fileInputLibrary" accept="image/jpeg,image/png,image/webp" onchange="handleFile(event)" style="display:none"/>
-        <img id="preview-img" class="preview-img"/>
-      </div>
-    </div>
-    <div>
-      <div class="card">
-        <div class="card-t">⚙️ Step 2 — Settings &amp; Generate</div>
-        <div class="gen-settings">
-          <div class="fg"><label>Grade</label><select id="g-grade"><option value="3">Grade 3</option><option value="4" selected>Grade 4</option><option value="5">Grade 5</option></select></div>
-          <div class="fg"><label>Questions</label><select id="g-num"><option value="5">5</option><option value="8">8</option><option value="10" selected>10</option><option value="15">15</option></select></div>
-          <div class="fg"><label>Alignment</label><select id="g-align"><option value="njsla">NJSLA</option><option value="njmap">NJMAP</option><option value="both" selected>Both</option></select></div>
-        </div>
-        <div style="background:rgba(14,165,233,.07);border:1px solid rgba(14,165,233,.2);border-radius:11px;padding:12px 14px;margin-bottom:13px;">
-          <p style="font-size:.76rem;font-weight:700;color:var(--teal2);line-height:1.7;">
-            🤖 AI generates <strong>Easy / Medium / Hard</strong> questions<br>
-            🎯 Tags each with NJSLA standard codes (e.g. 4.NF.B.4)<br>
-            ✅ Adds correct answer + kid-friendly explanation<br>
-            🚩 You can flag any question that seems off for review
-          </p>
-        </div>
-        <div style="background:rgba(168,85,247,.08);border:1.5px dashed rgba(168,85,247,.4);border-radius:12px;padding:12px;margin-top:4px;">
-          <p style="font-size:.72rem;color:var(--purple);font-weight:800;margin:0 0 8px;text-align:center;">⬆️ After uploading your photo, tap this button:</p>
-          <button class="btn-gen" id="gen-btn" onclick="generateQs()" disabled style="width:100%;font-size:1rem;padding:15px;">🧠 Generate Questions with AI</button>
-          <p style="font-size:.68rem;color:var(--muted2);font-weight:700;text-align:center;margin:6px 0 0;">Button activates once a photo is uploaded</p>
-        </div>
-      </div>
-      <div id="gen-error-box" style="display:none;margin-top:12px;background:rgba(244,63,94,.1);border:1.5px solid #f43f5e;border-radius:12px;padding:14px 16px;color:#f43f5e;font-size:.82rem;font-weight:700;line-height:1.7;word-break:break-word;"></div>
-      <div class="card gen-preview" id="gen-preview" style="margin-top:15px;display:none;">
-        <div class="card-t">✅ Step 4 — Preview &amp; Start Quiz</div>
-        <div id="gen-list"></div>
-        <button class="btn-am" style="width:100%;margin-top:13px;padding:15px;font-size:1rem;border-radius:14px;animation:pulse 2s infinite;" onclick="startGenQuiz()">🎯 Start Quiz with These Questions!</button>
-      </div>
-    </div>
+
+  <!-- QUESTION PREVIEW -->
+  <div class="card gen-preview" id="gen-preview" style="margin-top:14px;display:none;">
+    <div class="card-t">👀 Preview — Sample Questions</div>
+    <div id="gen-list"></div>
+    <button type="button" class="btn-am" style="width:100%;margin-top:13px;padding:15px;font-size:1rem;border-radius:14px;" onclick="startGenQuiz()">🎯 Quiz These Questions Now!</button>
   </div>
 </div>
-
 <!-- ▸ MY BANKS -->
 <div class="screen" id="sc-banks">
   <div class="ph"><h1>📚 My Question Banks</h1><p>Upload photos to build your bank. When ready, build a full test.</p></div>
@@ -1113,8 +1160,47 @@ function dbg(msg, data) {
     catch(e) { line += "\n  " + String(data).slice(0, 500); }
   }
   log.textContent = line + "\n\n" + log.textContent;
-  document.getElementById("debug-panel").style.display = "block";
+  // DO NOT auto-show panel — only show if user explicitly toggled it open
 }
+function toggleDebugPanel() {
+  var p = document.getElementById("debug-panel");
+  if (!p) return;
+  p.style.display = (p.style.display === "none" || p.style.display === "") ? "block" : "none";
+}
+function showSuccessModal(questionCount, bankCount, totalQ) {
+  var existing = document.getElementById('success-modal-overlay');
+  if (existing) existing.parentNode.removeChild(existing);
+
+  var overlay = document.createElement('div');
+  overlay.id = 'success-modal-overlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.7);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;animation:fadeUp .25s ease;';
+
+  var box = document.createElement('div');
+  box.style.cssText = 'background:linear-gradient(145deg,#1e2d42,#0f1f35);border:2px solid rgba(34,197,94,.4);border-radius:20px;padding:28px 24px;max-width:360px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.6);';
+
+  box.innerHTML =
+    '<div style="font-size:3rem;margin-bottom:8px;">🎉</div>' +
+    '<div style="font-size:1.1rem;font-weight:900;color:var(--green);margin-bottom:6px;">Questions Saved!</div>' +
+    '<div style="font-size:.88rem;font-weight:700;color:var(--text);margin-bottom:4px;">' + questionCount + ' new questions added to your bank</div>' +
+    '<div style="font-size:.78rem;color:var(--muted2);font-weight:600;margin-bottom:20px;">Your bank now has <strong style="color:var(--teal)">' + totalQ + ' total questions</strong> across ' + bankCount + ' topic' + (bankCount!==1?'s':'') + '</div>' +
+    '<div style="display:flex;gap:10px;">' +
+      '<button type="button" onclick="document.getElementById(\'success-modal-overlay\').remove(); resetUploadForNext();" ' +
+        'style="flex:1;padding:13px 10px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--teal),var(--purple));color:#fff;font-size:.85rem;font-weight:900;cursor:pointer;">' +
+        '🔁 Upload<br><span style="font-size:.72rem;font-weight:700;opacity:.85;">Another Page</span></button>' +
+      '<button type="button" onclick="document.getElementById(\'success-modal-overlay\').remove(); go(\'banks\');" ' +
+        'style="flex:1;padding:13px 10px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--green),var(--teal));color:#fff;font-size:.85rem;font-weight:900;cursor:pointer;">' +
+        '🎯 Build<br><span style="font-size:.72rem;font-weight:700;opacity:.85;">My Test →</span></button>' +
+    '</div>';
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  // Tap outside to dismiss
+  overlay.addEventListener('click', function(e) {
+    if (e.target === overlay) overlay.remove();
+  });
+}
+
 // Proxy URL — set in Settings if running from iPhone
 var PROXY_URL = "";
 
@@ -2079,14 +2165,80 @@ function processFile(file) {
   convertToJpeg(file, function(mime, b64, dataUrl) {
     _uploadMime = mime;
     _uploadB64 = b64;
-    var img = document.getElementById("preview-img");
-    if (img) { img.src = dataUrl; img.style.display = "block"; }
-    var gb = document.getElementById("gen-btn");
-    if (gb) gb.disabled = false;
-    var gp = document.getElementById("gen-preview");
-    if (gp) gp.style.display = "none";
-    var pc = document.getElementById("photo-count");
-    if (pc) pc.textContent = "1 photo ready • converted to JPEG";
+    var img = document.getElementById('preview-img');
+    if (img) { img.src = dataUrl; img.style.display = 'block'; }
+    // Activate generate button
+    var gb = document.getElementById('gen-btn');
+    if (gb) { gb.disabled = false; gb.style.opacity = '1'; gb.style.transform = 'scale(1)'; }
+    var hint = document.getElementById('gen-btn-hint');
+    if (hint) hint.textContent = '✅ Photo ready — tap Generate now!';
+function resetUploadForNext() {
+  // Reset all file inputs
+  var ids = ['fileInput','fileInputCamera','fileInputLibrary'];
+  for(var _ri=0;_ri<ids.length;_ri++){
+    var el=document.getElementById(ids[_ri]);
+    if(el) el.value='';
+  }
+  _uploadB64 = null; _uploadMime = null; _multiFiles = [];
+  // Reset preview
+  var img = document.getElementById('preview-img');
+  if (img) { img.src=''; img.style.display='none'; }
+  var pc = document.getElementById('photo-count');
+  if (pc) pc.textContent = '';
+  // Reset button
+  var gb = document.getElementById('gen-btn');
+  if (gb) { gb.disabled = true; gb.style.opacity = '0.4'; }
+  var hint = document.getElementById('gen-btn-hint');
+  if (hint) hint.textContent = 'Upload a photo to activate this button';
+  // Reset wizard
+  var wm = document.getElementById('gen-waiting-msg');
+  var rm = document.getElementById('gen-ready-msg');
+  if (wm) wm.style.display = 'block';
+  if (rm) rm.style.display = 'none';
+  var wh = document.getElementById('wiz-hint');
+  if (wh) { wh.textContent = '👆 Pick a photo of your textbook page to get started'; wh.style.color = 'var(--teal)'; }
+  // Reset wizard steps
+  var s2 = document.getElementById('wiz-step2');
+  if (s2) { s2.style.background = 'rgba(255,255,255,.03)'; s2.style.border = '2px solid rgba(255,255,255,.08)'; }
+  var s3 = document.getElementById('wiz-step3');
+  if (s3) { s3.style.background = 'rgba(255,255,255,.03)'; s3.style.border = '2px solid rgba(255,255,255,.08)'; }
+  // Hide success/preview cards
+  var sc = document.getElementById('gen-success-card');
+  if (sc) sc.style.display = 'none';
+  var gp = document.getElementById('gen-preview');
+  if (gp) gp.style.display = 'none';
+  var eb = document.getElementById('gen-error-box');
+  if (eb) eb.style.display = 'none';
+  // Scroll back to top
+  try { document.getElementById('sc-upload').scrollTop = 0; window.scrollTo(0,0); } catch(e){}
+  showToast('Ready for next photo!');
+}
+
+    // Update wizard
+    var wm = document.getElementById('gen-waiting-msg');
+    var rm = document.getElementById('gen-ready-msg');
+    if (wm) wm.style.display = 'none';
+    if (rm) rm.style.display = 'block';
+    var wh = document.getElementById('wiz-hint');
+    if (wh) wh.textContent = '✅ Photo loaded! Now tap "Generate Questions with AI" ↓';
+    if (wh) wh.style.color = 'var(--green)';
+    // Highlight step 2
+    var s2 = document.getElementById('wiz-step2');
+    if (s2) { s2.style.background = 'rgba(245,158,11,.2)'; s2.style.border = '2px solid var(--amber)'; s2.querySelector('div:nth-child(2)').style.color = 'var(--amber)'; }
+    var pc = document.getElementById('photo-count');
+    if (pc) pc.textContent = '✅ 1 photo ready — converted to JPEG';
+    // Clear old success/error
+    var gp = document.getElementById('gen-preview');
+    if (gp) gp.style.display = 'none';
+    var sc = document.getElementById('gen-success-card');
+    if (sc) sc.style.display = 'none';
+    var eb = document.getElementById('gen-error-box');
+    if (eb) eb.style.display = 'none';
+    // Scroll to generate button
+    setTimeout(function(){
+      var ga = document.getElementById('generate-action-card');
+      if (ga) ga.scrollIntoView({behavior:'smooth', block:'start'});
+    }, 400);
   });
 }
 
@@ -2187,16 +2339,28 @@ function generateQs() {
     bank.questions = valid; bank.id = Date.now();
     dbg("Saving bank", {topic: bank.topic, questionCount: valid.length});
     BANKS.push(bank); saveBanks(); renderBanks(); renderBankTopicList();
+    var totalQ=0;for(var _tqi=0;_tqi<BANKS.length;_tqi++){totalQ+=(BANKS[_tqi].questions||[]).length;}
     window._genBank = bank; showGenPreview(bank);
     dbg("SUCCESS - bank saved, showing preview");
-    showToast(valid.length + ' questions added to bank!');
-    var errBox = document.getElementById('gen-error-box');
-    if (errBox) {
-      errBox.style.cssText='display:block;background:rgba(34,197,94,.1);border:1.5px solid var(--green);border-radius:13px;padding:14px;margin-top:14px;color:var(--green);font-size:.85rem;font-weight:700;line-height:1.8;';
-      errBox.innerHTML='✅ '+valid.length+' questions added to your bank!<br>'+
-        '<span style="font-size:.78rem;color:var(--muted2);">Upload another photo or go build your test</span><br>'+
-        '<button onclick="go(\'banks\')" style="margin-top:8px;padding:8px 18px;border-radius:10px;border:none;background:linear-gradient(135deg,var(--green),var(--teal));color:#fff;font-weight:800;font-size:.82rem;cursor:pointer;">📚 View Banks & Build Test →</button>';
-    }
+        // Count totals for modal
+    var _totalQ2=0; for(var _tqi2=0;_tqi2<BANKS.length;_tqi2++){_totalQ2+=(BANKS[_tqi2].questions||[]).length;}
+    // Show success modal dialog
+    showSuccessModal(valid.length, BANKS.length, _totalQ2);
+    // Update wizard steps
+    var s3=document.getElementById('wiz-step3');
+    if(s3){s3.style.background='rgba(34,197,94,.2)';s3.style.border='2px solid var(--green)';}
+    var s4=document.getElementById('wiz-step4');
+    if(s4){s4.style.background='rgba(168,85,247,.15)';s4.style.border='2px solid var(--purple)';}
+    var wh=document.getElementById('wiz-hint');
+    if(wh){wh.textContent='🎉 Saved! Upload another page or tap Build My Test';wh.style.color='var(--green)';}
+    // Show inline success card too
+    var _sc=document.getElementById('gen-success-card');
+    var _sm=document.getElementById('gen-success-msg');
+    if(_sm) _sm.textContent='🎉 '+valid.length+' questions saved! Total bank: '+_totalQ2+' questions';
+    if(_sc) _sc.style.display='block';
+    // Hide error box
+    var errBox=document.getElementById('gen-error-box');
+    if(errBox) errBox.style.display='none';
     doneLoading();
   })
   .catch(function(fetchErr) {
@@ -2606,6 +2770,6 @@ function renderSkillMastery() {
   </div>
   <pre id="debug-log" style="margin:0;padding:10px 12px;color:#94a3b8;white-space:pre-wrap;word-break:break-all;"></pre>
 </div>
-<button id="debug-toggle-btn" onclick="var p=document.getElementById('debug-panel');p.style.display=p.style.display==='none'?'block':'none';" style="position:fixed;bottom:70px;right:12px;z-index:99998;background:#f43f5e;color:#fff;border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.4);">🐛 Debug</button>
+<button id="debug-toggle-btn" onclick="toggleDebugPanel()" style="position:fixed;bottom:70px;right:12px;z-index:99998;background:#f43f5e;color:#fff;border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.4);">🐛 Debug</button>
 </body>
 </html>
