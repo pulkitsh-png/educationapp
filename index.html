@@ -813,8 +813,9 @@ select option {
         <div class="fg"><label>Test Length</label>
           <select id="test-len"><option value="10">Quick — 10 Questions</option><option value="20" selected>Standard — 20 Questions</option><option value="30">Full NJSLA Sim — 30 Questions</option></select>
         </div>
-        <div class="fg"><label>Question Pool</label>
-          <select id="test-pool"><option value="builtin">Built-in Only</option><option value="all" selected>Built-in + My Banks</option></select>
+        <div style="background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:10px 13px;margin-bottom:0;">
+          <div style="font-size:.72rem;font-weight:900;color:var(--green);margin-bottom:3px;">📚 Question Pool</div>
+          <div style="font-size:.75rem;color:var(--muted2);font-weight:600;line-height:1.5;">Built-in topics + all your uploaded question banks — every question available!</div>
         </div>
         <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:11px;padding:12px 13px;">
           <div style="font-size:.7rem;font-weight:900;color:var(--amber);margin-bottom:5px;">After the test you get:</div>
@@ -1582,35 +1583,46 @@ function startGenQuiz() {
 }
 
 function launchTopicQuiz(questions, topicName) {
+  window._fullTestPool = null;
   showPreTestDialog(shuffle(questions.slice()), topicName, 1);
 }
 
 function startFullTest() {
-  var len = parseInt(document.getElementById('test-len').value);
-  var pool = document.getElementById('test-pool').value;
-
+  var len = parseInt(document.getElementById('test-len').value) || 20;
   var all = [];
-  for(var _bui=0;_bui<BUILTIN.length;_bui++){var _bub=BUILTIN[_bui];for(var _qi=0;_qi<_bub.questions.length;_qi++)all.push(_bub.questions[_qi]);}
-  if(pool==='all'){for(var _bki=0;_bki<BANKS.length;_bki++){var _bkb=BANKS[_bki];if(_bkb.questions){for(var _qj=0;_qj<_bkb.questions.length;_qj++)all.push(_bkb.questions[_qj]);}}}
-
+  for(var _bui=0;_bui<BUILTIN.length;_bui++){
+    var _bub=BUILTIN[_bui];
+    for(var _qi=0;_qi<_bub.questions.length;_qi++) all.push(_bub.questions[_qi]);
+  }
+  for(var _bki=0;_bki<BANKS.length;_bki++){
+    var _bkb=BANKS[_bki];
+    if(_bkb.questions){for(var _qj=0;_qj<_bkb.questions.length;_qj++) all.push(_bkb.questions[_qj]);}
+  }
+  if (!all.length) { showToast('No questions available! Add topics or upload photos first.'); return; }
   var easy   = shuffle(all.filter(function(q){return q.diff==='easy';}));
   var medium = shuffle(all.filter(function(q){return q.diff==='medium';}));
   var hard   = shuffle(all.filter(function(q){return q.diff==='hard'||!q.diff;}));
+  window._fullTestLen = len;
+  window._fullTestPool = { easy:easy, medium:medium, hard:hard };
+  showPreTestDialog(all, 'Full Adaptive Test', BUILTIN.length + BANKS.length);
+}
 
-  if (!medium.length && !easy.length && !hard.length) { showToast('No questions available!'); return; }
-
+function doLaunchFullTest(timed) {
+  var pool = window._fullTestPool;
+  var len  = window._fullTestLen || 20;
+  if (!pool) { showToast('Error: no question pool.'); return; }
+  var first = pool.medium.shift() || pool.easy.shift() || pool.hard.shift();
+  if (!first) { showToast('No questions found!'); return; }
   resetQS();
   QS.mode = 'full';
   QS.topicName = 'Full Adaptive Test';
   QS.targetLen = len;
-  QS.pool = { easy:easy, medium:medium, hard:hard };
-
-  // Start with first medium question
-  var first = QS.pool.medium.shift() || QS.pool.easy.shift() || QS.pool.hard.shift();
+  QS.timed = timed;
+  QS.pool = pool;
   QS.questions = [first];
   QS.usedSet[first.q] = true;
-
-  go('quiz');
+  window._fullTestPool = null;
+  goForce('quiz');
   buildAdaptNodes();
   renderQ();
 }
@@ -1980,7 +1992,7 @@ function showResult() {
     if (nbWrap2) nbWrap2.style.display = 'none';
   }
 
-  go('result');
+  goForce('result');
   if (acc >= 70) confetti();
 }
 
@@ -2538,14 +2550,19 @@ function launchPreTest() {
   var count = window._pretestCount || 20;
   var timed = window._pretestTimed !== false;
   closePretestModal();
+  if (window._fullTestPool) {
+    doLaunchFullTest(timed);
+    return;
+  }
   var finalQ = questions.slice(0, count);
+  if (!finalQ.length) { showToast('No questions!'); return; }
   resetQS();
   QS.questions = finalQ;
   QS.targetLen = finalQ.length;
   QS.mode = 'banks';
   QS.topicName = 'My Question Banks';
   QS.timed = timed;
-  go('quiz');
+  goForce('quiz');
   buildAdaptNodes();
   renderQ();
 }
@@ -2772,7 +2789,7 @@ function openCapture(captureMode) {
 // Override go() to also sync mobile nav
 var _goOriginal = go;
 // (We redefine go to also handle bottom nav sync on mobile)
-function go(name) {
+function goForce(name) {
   var screens = document.getElementsByClassName('screen');
   for (var si=0; si<screens.length; si++) { screens[si].classList.remove('on'); }
   var navs = document.getElementsByClassName('nav');
@@ -2794,6 +2811,50 @@ function go(name) {
   if (name==='flagged') { try { renderFlags(); } catch(e){} }
   if (name==='settings') { var ki=document.getElementById('api-key-input'); if(ki&&P.apiKey) ki.value=P.apiKey; }
   try { window.scrollTo(0,0); } catch(e){}
+}
+
+function go(name) {
+  var quizActive = QS && QS.questions && QS.questions.length > 0 && QS.current < (QS.targetLen||0);
+  var leavingQuiz = (name !== 'quiz' && name !== 'result');
+  if (quizActive && leavingQuiz) { showQuitQuizDialog(name); return; }
+  goForce(name);
+}
+
+function showQuitQuizDialog(destination) {
+  window._quitDestination = destination;
+  var existing = document.getElementById('quit-quiz-modal');
+  if (existing) existing.parentNode.removeChild(existing);
+  var qNum = (QS.current||0) + 1;
+  var qTotal = QS.targetLen || 0;
+  var overlay = document.createElement('div');
+  overlay.id = 'quit-quiz-modal';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.82);z-index:9500;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML =
+    '<div style="background:linear-gradient(145deg,#1a2d45,#0f1f35);border:2px solid rgba(244,63,94,.4);border-radius:20px;padding:28px 22px;max-width:310px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.7);">' +
+      '<div style="font-size:2.4rem;margin-bottom:10px;">\u26a0\ufe0f</div>' +
+      '<div style="font-size:1rem;font-weight:900;color:var(--text);margin-bottom:8px;">Leave the Test?</div>' +
+      '<div style="font-size:.82rem;color:var(--muted2);font-weight:600;margin-bottom:20px;line-height:1.6;">You are on <span style="color:var(--amber);font-weight:900;">Q'+qNum+' of '+qTotal+'</span>.<br>All progress will be lost.</div>' +
+      '<div style="display:flex;gap:10px;">' +
+        '<button type="button" onclick="continueQuiz()" style="flex:1;padding:13px;border-radius:12px;border:2px solid var(--green);background:rgba(34,197,94,.12);color:var(--green);font-size:.88rem;font-weight:900;cursor:pointer;">\u2705 Keep Going</button>' +
+        '<button type="button" onclick="quitQuiz()" style="flex:1;padding:13px;border-radius:12px;border:2px solid var(--red);background:rgba(244,63,94,.12);color:var(--red);font-size:.88rem;font-weight:900;cursor:pointer;">\u274c Yes, Leave</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+}
+
+function continueQuiz() {
+  var modal = document.getElementById('quit-quiz-modal');
+  if (modal) modal.parentNode.removeChild(modal);
+  goForce('quiz');
+}
+
+function quitQuiz() {
+  var modal = document.getElementById('quit-quiz-modal');
+  if (modal) modal.parentNode.removeChild(modal);
+  var dest = window._quitDestination || 'home';
+  window._quitDestination = null;
+  resetQS();
+  goForce(dest);
 }
 
 
