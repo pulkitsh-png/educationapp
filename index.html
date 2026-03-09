@@ -968,7 +968,7 @@ body::before{
       <div class="card" style="margin-bottom:15px;">
         <div class="card-t">📷 Step 1 — Take or Pick Your Photo</div>
         <div class="upload-zone" id="upload-zone" onclick="document.getElementById('fileInput').click()">
-          <input type="file" id="fileInput" accept="image/*" multiple onchange="handleFile(event)" style="display:none"/>
+          <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" multiple onchange="handleFile(event)" style="display:none"/>
           <span class="uz-icon">📖</span>
           <h3>📸 Tap here — or use buttons below</h3>
           <p id="photo-count" style="color:var(--teal);font-size:.85rem;font-weight:700;margin:6px 0 0;min-height:1.2em;"></p>
@@ -983,8 +983,8 @@ body::before{
             🖼️ Photo Library
           </button>
         </div>
-        <input type="file" id="fileInputCamera" accept="image/*" capture="environment" onchange="handleFile(event)" style="display:none"/>
-        <input type="file" id="fileInputLibrary" accept="image/*" onchange="handleFile(event)" style="display:none"/>
+        <input type="file" id="fileInputCamera" accept="image/jpeg,image/png,image/webp" capture="environment" onchange="handleFile(event)" style="display:none"/>
+        <input type="file" id="fileInputLibrary" accept="image/jpeg,image/png,image/webp" onchange="handleFile(event)" style="display:none"/>
         <img id="preview-img" class="preview-img"/>
       </div>
     </div>
