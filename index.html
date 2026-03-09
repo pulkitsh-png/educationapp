@@ -1520,8 +1520,7 @@ function refreshDashboard() {
   var grid = g('d-badges-grid');
   if (grid) {
     grid.innerHTML =
-      toShow.map(function(b){return '<div class="badge-item got" title="'+(b.desc||'')+'"><span class="badge-ico">'+(b.ico||'🏅')+'</span><div class="badge-name">'+(b.name||'')+'</div></div>';}).join('') +
-      Array(emptySlots).fill('<div class="badge-item"><span class="badge-ico">🔒</span><div class="badge-name">Locked</div></div>').join('');
+      (function(){var _bh=''; for(var _bi=0;_bi<toShow.length;_bi++){var b=toShow[_bi];_bh+='<div class="badge-item got" title="'+(b.desc||'')+'"><span class="badge-ico">'+(b.ico||'🏅')+'</span><div class="badge-name">'+(b.name||'')+'</div></div>';} for(var _li=0;_li<emptySlots;_li++){_bh+='<div class="badge-item"><span class="badge-ico">🔒</span><div class="badge-name">Locked</div></div>';} return _bh;}());
   }
 }
 
@@ -1694,9 +1693,9 @@ function renderQ() {
 
   // Options
   var labels = ['A','B','C','D'];
-  document.getElementById('opts').innerHTML=(q.opts||[]).map(function(opt,i){
-    return '<button class="opt" id="opt-'+i+'" onclick="pickAns('+i+')" type="button"><div class="opt-lbl">'+labels[i]+'</div><span>'+opt+'</span></button>';
-  }).join('');
+  var _opts=q.opts||[]; var _ohtml='';
+  for(var _oi=0;_oi<_opts.length;_oi++){_ohtml+='<button class="opt" id="opt-'+_oi+'" onclick="pickAns('+_oi+')" type="button"><div class="opt-lbl">'+labels[_oi]+'</div><span>'+_opts[_oi]+'</span></button>';}
+  document.getElementById('opts').innerHTML=_ohtml;
 
   // Reset UI elements
   document.getElementById('feedback').className = 'feedback';
@@ -1976,7 +1975,7 @@ function showResult() {
     var nbWrap = document.getElementById('r-new-badges');
     var nbRow = document.getElementById('r-new-badges-row');
     if (nbWrap) nbWrap.style.display = 'block';
-    if (nbRow) nbRow.innerHTML = newlyEarned.map(function(b) { return '<div class="nb-item"><span class="nb-ico">' + (b.ico||'🏅') + '</span><div class="nb-nm">' + (b.name||'') + '</div></div>'; }).join('');
+    if(nbRow){var _nbh='';for(var _nbi=0;_nbi<newlyEarned.length;_nbi++){var _nb=newlyEarned[_nbi];_nbh+='<div class="nb-item"><span class="nb-ico">'+ (_nb.ico||'🏅')+'</span><div class="nb-nm">'+(_nb.name||'')+'</div></div>';} nbRow.innerHTML=_nbh;}
   } else {
     var nbWrap2 = document.getElementById('r-new-badges');
     if (nbWrap2) nbWrap2.style.display = 'none';
@@ -2027,10 +2026,8 @@ function renderAllBadges() {
   if (countEl) countEl.textContent = '(' + earned.length + ' / ' + BADGES.length + ' earned)';
   var grid = document.getElementById('all-badges');
   if (!grid) return;
-  grid.innerHTML=BADGES.map(function(b){
-    var _gc=earned.indexOf(b.id)!==-1?'got':'';
-    return '<div class="badge-item '+_gc+'" title="'+(b.desc||'')+'"><span class="badge-ico">'+(b.ico||'🏅')+'</span><div class="badge-name">'+(b.name||'')+'</div><div class="badge-desc">'+(b.desc||'')+'</div></div>';
-  }).join('');
+  var _bagh=''; for(var _bagi=0;_bagi<BADGES.length;_bagi++){var b=BADGES[_bagi];var _gc=earned.indexOf(b.id)!==-1?'got':'';_bagh+='<div class="badge-item '+_gc+'" title="'+(b.desc||'')+'"><span class="badge-ico">'+(b.ico||'🏅')+'</span><div class="badge-name">'+(b.name||'')+'</div><div class="badge-desc">'+(b.desc||'')+'</div></div>';}
+  grid.innerHTML=_bagh;
 }
 
 // ═══════════════════════════════════════════════
@@ -2286,7 +2283,8 @@ function generateQs() {
   function doneLoading() { if (loader) loader.classList.remove("on"); if (genBtn) genBtn.disabled = false; }
   var promptText = "You are a Grade " + grade + " NJ math teacher creating NJSLA/NJMAP quiz questions. "
     + "Look at this textbook image and create exactly " + numQ + " multiple choice questions. "
-    + 'Reply with ONLY a JSON object, no other text, no markdown fences. '
+    + 'Reply with ONLY a raw JSON object. No markdown, no code fences, no preamble. '
+    + 'CRITICAL: Use ONLY plain ASCII straight quotes and characters in all text. NO smart quotes, NO curly quotes, NO em-dashes, NO special Unicode. '
     + 'Format: {"topic":"Topic Name","lesson":"10-1","questions":[{"q":"question text","opts":["A text","B text","C text","D text"],"ans":0,"diff":"easy","skill":"4.NF.B.4a","exp":"explanation"}]}';
   var contentArr = [];
   contentArr.push({ type:"text", text: promptText });
@@ -2327,8 +2325,15 @@ function generateQs() {
     var a = raw.indexOf("{"); var b = raw.lastIndexOf("}");
     if (a === -1 || b <= a) { doneLoading(); showGenError("No JSON in response: " + raw.slice(0,200)); return; }
     raw = raw.slice(a, b+1);
+    // Fix common AI special characters that break JSON.parse
+    raw = raw.replace(/[\u2018\u2019\u201A\u201B]/g, "'");
+    raw = raw.replace(/[\u201C\u201D\u201E\u201F]/g, '"');
+    raw = raw.replace(/[\u2013\u2014\u2015]/g, '-');
+    raw = raw.replace(/\u2026/g, '...');
+    raw = raw.replace(/\u00A0/g, ' ');
+    raw = raw.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
     var bank;
-    try { bank = JSON.parse(raw); } catch(pe) { doneLoading(); showGenError("JSON parse error: " + pe.message + " | " + raw.slice(0,150)); return; }
+    try { bank = JSON.parse(raw); } catch(pe) { doneLoading(); showGenError("JSON parse error: " + pe.message + " | " + raw.slice(0,200)); return; }
     if (!bank.questions || !bank.questions.length) { doneLoading(); showGenError("No questions found in AI response"); return; }
     var valid = [];
     for (var vi=0; vi<bank.questions.length; vi++) {
@@ -2412,22 +2417,25 @@ function renderBanks() {
     el.innerHTML='<div class="empty"><div class="empty-ico">📭</div><p>No banks yet</p><small>Upload textbook photos to build your question bank</small><br><button class="btn-am" style="margin-top:16px;padding:10px 22px;" onclick="go(\'upload\')">📸 Upload Now</button></div>';
     return;
   }
-  el.innerHTML='<div class="g2">'+BANKS.map(function(b){
-    var qs=b.questions||[];
+  var _bhtml='<div class="g2">';
+  for(var _rbi2=0;_rbi2<BANKS.length;_rbi2++){
+    var b=BANKS[_rbi2]; var qs=b.questions||[];
     var skills=[]; var seen={};
     for(var _sqi=0;_sqi<qs.length;_sqi++){var _sq=qs[_sqi];if(_sq.skill&&!seen[_sq.skill]){seen[_sq.skill]=1;skills.push(_sq.skill);}}
-    return '<div class="bank-card">'+
+    var _stags=''; for(var _sti=0;_sti<Math.min(skills.length,5);_sti++){_stags+='<span class="stag">'+skills[_sti]+'</span>';}
+    _bhtml+='<div class="bank-card">'+
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;">'+
         '<div><div class="bank-name">📚 '+(b.topic||'Custom Bank')+'</div>'+
         '<div class="bank-sub">'+(b.lesson||'Custom')+' · '+qs.length+' questions</div></div>'+
         '<span style="background:rgba(34,197,94,.15);color:var(--green);border-radius:999px;padding:3px 9px;font-size:.68rem;font-weight:800;">'+qs.length+' Qs</span>'+
       '</div>'+
-      '<div class="skill-tags">'+skills.slice(0,5).map(function(s){return '<span class="stag">'+s+'</span>';}).join('')+'</div>'+
+      '<div class="skill-tags">'+_stags+'</div>'+
       '<div class="bank-btns">'+
         '<button class="bxs bxs-t" onclick="startBankById('+b.id+')">🎯 Quiz This Bank</button> '+
         '<button class="bxs bxs-r" onclick="deleteBank('+b.id+')">🗑 Delete</button>'+
       '</div></div>';
-  }).join('')+'</div>';
+  }
+  el.innerHTML=_bhtml+'</div>';
 }
 
 function buildTestFromAllBanks() {
@@ -2461,21 +2469,24 @@ function renderFlags() {
   var el = document.getElementById('flagged-list');
   if (!el) return;
   if (!FLAGS.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-ico">✅</div><p>No flagged questions</p><small>During a quiz, tap 🚩 Flag on any question that seems off</small></div>';
+    el.innerHTML='<div class="empty"><div class="empty-ico">✅</div><p>No flagged questions</p><small>During a quiz, tap 🚩 Flag on any question that seems off</small></div>';
     return;
   }
-  el.innerHTML = '<div class="flag-list">' + FLAGS.map(function(f, i) {
-    var opts = f.opts || [];
-    var optStr = opts.map(function(o,j){ return ['A','B','C','D'][j] + ') ' + o; }).join(' · ');
-    return '<div class="flag-item">' +
-      '<div class="flag-q">Q: ' + (f.q||'—') + '</div>' +
-      '<div class="flag-ans">✅ Correct answer: ' + (opts[f.ans]||'—') + '</div>' +
-      '<div style="font-size:.73rem;color:var(--muted2);margin-top:4px;">Options: ' + optStr + '</div>' +
-      (f.exp ? '<div style="font-size:.73rem;color:var(--muted2);margin-top:4px;">Explanation: ' + f.exp + '</div>' : '') +
-      '<div class="flag-src">Source: ' + (f.source||'—') + ' · Skill: ' + (f.skill||'—') + ' · Difficulty: ' + (f.diff||'—') + '</div>' +
-      '<button class="btn-unflag" onclick="unflag(' + i + ')">✅ Mark as Verified & Remove</button>' +
+  var _fh='<div class="flag-list">';
+  for(var _fi=0;_fi<FLAGS.length;_fi++){
+    var f=FLAGS[_fi]; var opts=f.opts||[];
+    var optStr='';
+    for(var _oi=0;_oi<opts.length;_oi++){optStr+=(['A','B','C','D'][_oi]||_oi)+') '+opts[_oi]+(_oi<opts.length-1?' · ':'');}
+    _fh+='<div class="flag-item">'+
+      '<div class="flag-q">Q: '+(f.q||'—')+'</div>'+
+      '<div class="flag-ans">✅ Correct answer: '+(opts[f.ans]||'—')+'</div>'+
+      '<div style="font-size:.73rem;color:var(--muted2);margin-top:4px;">Options: '+optStr+'</div>'+
+      (f.exp?'<div style="font-size:.73rem;color:var(--muted2);margin-top:4px;">Explanation: '+f.exp+'</div>':'')+
+      '<div class="flag-src">Source: '+(f.source||'—')+' · Skill: '+(f.skill||'—')+' · Difficulty: '+(f.diff||'—')+'</div>'+
+      '<button class="btn-unflag" onclick="unflag('+_fi+')">✅ Mark as Verified & Remove</button>'+
     '</div>';
-  }).join('') + '</div>';
+  }
+  el.innerHTML=_fh+'</div>';
 }
 
 function unflag(i) {
