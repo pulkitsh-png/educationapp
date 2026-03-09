@@ -2059,7 +2059,7 @@ function compressCanvas(canvas, maxB64Bytes) {
   return b64.replace(/[\s\r\n]/g, "");
 }
 
-function drawBitmapToB64(bitmap) {
+function bitmapToB64(bitmap) {
   var MAX = 800;
   var w = bitmap.width, h = bitmap.height;
   if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
@@ -2076,51 +2076,46 @@ function drawBitmapToB64(bitmap) {
 }
 
 function convertToJpeg(file, callback) {
-  var isHeic = file.type === "image/heic" || file.type === "image/heif" ||
-               file.name && /\.hei[cf]$/i.test(file.name);
-
-  function processBlob(blob) {
+  // Try via object URL (works for HEIC on Safari iOS 16+, and all JPEG/PNG)
+  var objectUrl = URL.createObjectURL(file);
+  var img = new Image();
+  img.onload = function() {
+    var b64 = bitmapToB64(img);
+    URL.revokeObjectURL(objectUrl);
+    callback("image/jpeg", b64, "data:image/jpeg;base64,"+b64);
+  };
+  img.onerror = function() {
+    URL.revokeObjectURL(objectUrl);
+    dbg("Object URL failed, trying FileReader");
+    // Fallback: FileReader -> data URL
     var reader = new FileReader();
     reader.onload = function(ev) {
       var dataUrl = ev.target.result;
-      var img = new Image();
-      img.onload = function() {
-        var b64 = drawBitmapToB64(img);
+      var img2 = new Image();
+      img2.onload = function() {
+        var b64 = bitmapToB64(img2);
         callback("image/jpeg", b64, "data:image/jpeg;base64,"+b64);
       };
-      img.onerror = function() {
+      img2.onerror = function() {
+        // Last resort: createImageBitmap
+        dbg("FileReader img failed, trying createImageBitmap");
         if (window.createImageBitmap) {
-          createImageBitmap(blob).then(function(bm) {
-            var b64 = drawBitmapToB64(bm);
+          createImageBitmap(file).then(function(bm) {
+            var b64 = bitmapToB64(bm);
             callback("image/jpeg", b64, "data:image/jpeg;base64,"+b64);
           }).catch(function(e) {
-            dbg("createImageBitmap failed: "+e.message);
-            showGenError("Cannot process this image. Please use JPEG format.");
+            dbg("All methods failed: "+e.message);
+            showGenError("Cannot decode this image. Go to iPhone Settings > Camera > Formats > Most Compatible to shoot in JPEG.");
           });
         } else {
-          showGenError("Cannot process this image. Please use JPEG format.");
+          showGenError("Cannot decode this image format. Go to iPhone Settings > Camera > Formats > Most Compatible.");
         }
       };
-      img.src = dataUrl;
+      img2.src = dataUrl;
     };
-    reader.readAsDataURL(blob);
-  }
-
-  if (isHeic && window.heic2any) {
-    dbg("HEIC detected - converting with heic2any");
-    heic2any({ blob: file, toType: "image/jpeg", quality: 0.7 })
-      .then(function(jpegBlob) {
-        dbg("heic2any success, blob size: "+jpegBlob.size);
-        processBlob(jpegBlob);
-      })
-      .catch(function(e) {
-        dbg("heic2any failed: "+e.message+", trying direct");
-        processBlob(file);
-      });
-  } else {
-    if (isHeic) dbg("HEIC but no heic2any library - trying direct");
-    processBlob(file);
-  }
+    reader.readAsDataURL(file);
+  };
+  img.src = objectUrl;
 }
 
 function processFile(file) {
