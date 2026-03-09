@@ -1394,7 +1394,7 @@ function resetQS() {
     pool:{ easy:[], medium:[], hard:[] },
     usedSet:{},
     targetLen:10,
-    timerInterval:null, timeLeft:30, answered:false,
+    timerInterval:null, timeLeft:30, answered:false, timed:true,
   };
 }
 
@@ -1582,14 +1582,7 @@ function startGenQuiz() {
 }
 
 function launchTopicQuiz(questions, topicName) {
-  resetQS();
-  QS.questions = shuffle(questions.slice());
-  QS.targetLen = questions.length;
-  QS.mode = 'topic';
-  QS.topicName = topicName;
-  go('quiz');
-  buildAdaptNodes();
-  renderQ();
+  showPreTestDialog(shuffle(questions.slice()), topicName, 1);
 }
 
 function startFullTest() {
@@ -1726,6 +1719,12 @@ function renderQ() {
 var TIMER_CIRC = 75.4; // 2π × 12 (r=12 in 36×36 viewBox)
 function startTimer() {
   clearInterval(QS.timerInterval);
+  var timerBox = document.getElementById('timer-box');
+  if (QS.timed === false) {
+    if (timerBox) timerBox.style.display = 'none';
+    return;
+  }
+  if (timerBox) timerBox.style.display = '';
   QS.timeLeft = 30;
   updateTimerUI();
   QS.timerInterval = setInterval(function() {
@@ -2438,19 +2437,117 @@ function renderBanks() {
   el.innerHTML=_bhtml+'</div>';
 }
 
+function closePretestModal() {
+  var _m = document.getElementById('pretest-modal');
+  if (_m) _m.parentNode.removeChild(_m);
+}
+
 function buildTestFromAllBanks() {
   var allQ = [];
-  for(var _abi=0;_abi<BANKS.length;_abi++){var _abqs=BANKS[_abi].questions||[];for(var _aqi=0;_aqi<_abqs.length;_aqi++){allQ.push(_abqs[_aqi]);}}
-  if (!allQ.length) { showToast('No questions yet! Upload textbook photos first.'); return; }
-  for (var i=allQ.length-1; i>0; i--) {
-    var j=Math.floor(Math.random()*(i+1)); var tmp=allQ[i]; allQ[i]=allQ[j]; allQ[j]=tmp;
+  for(var _abi=0;_abi<BANKS.length;_abi++){
+    var _abqs=BANKS[_abi].questions||[];
+    for(var _aqi=0;_aqi<_abqs.length;_aqi++){allQ.push(_abqs[_aqi]);}
   }
-  allQ = allQ.slice(0,40);
-  QS = allQ;
-  window._qIdx=0; window._correct=0; window._wrong=0; window._streak=0;
-  showToast('Starting test with '+allQ.length+' questions!');
+  if (!allQ.length) { showToast('No questions yet! Upload textbook photos first.'); return; }
+  for(var i=allQ.length-1;i>0;i--){
+    var j=Math.floor(Math.random()*(i+1));var tmp=allQ[i];allQ[i]=allQ[j];allQ[j]=tmp;
+  }
+  showPreTestDialog(allQ, 'All Banks (' + BANKS.length + ' topics)', BANKS.length);
+}
+
+function showPreTestDialog(questions, topicName, bankCount) {
+  var existing = document.getElementById('pretest-modal');
+  if (existing) existing.parentNode.removeChild(existing);
+  window._pretestQuestions = questions;
+  window._pretestTimed = true;
+  window._pretestCount = Math.min(20, questions.length);
+
+  var qMax = questions.length;
+  var overlay = document.createElement('div');
+  overlay.id = 'pretest-modal';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  var c20 = Math.min(20, qMax);
+  var c30 = Math.min(30, qMax);
+
+  overlay.innerHTML =
+    '<div style="background:linear-gradient(145deg,#1a2d45,#0f1f35);border:2px solid rgba(14,165,233,.35);border-radius:20px;padding:26px 22px;max-width:360px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.6);">' +
+      '<div style="text-align:center;margin-bottom:16px;">' +
+        '<div style="font-size:2.2rem;margin-bottom:6px;">🎯</div>' +
+        '<div style="font-size:1.05rem;font-weight:900;color:var(--text);margin-bottom:4px;">Ready to Test?</div>' +
+        '<div style="font-size:.8rem;font-weight:700;color:var(--muted2);">' + qMax + ' questions available · ' + bankCount + ' topic' + (bankCount!==1?'s':'') + '</div>' +
+      '</div>' +
+      '<div style="margin-bottom:14px;">' +
+        '<div style="font-size:.72rem;font-weight:900;color:var(--muted2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">⏱ Timer</div>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<button id="pt-timed" type="button" onclick="selectTimerMode(true)" style="flex:1;padding:11px 8px;border-radius:11px;border:2px solid var(--teal);background:rgba(14,165,233,.15);color:var(--teal);font-size:.82rem;font-weight:800;cursor:pointer;">⏰ Timed<br><span style="font-size:.67rem;font-weight:600;opacity:.8;">30 sec/question</span></button>' +
+          '<button id="pt-untimed" type="button" onclick="selectTimerMode(false)" style="flex:1;padding:11px 8px;border-radius:11px;border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--muted2);font-size:.82rem;font-weight:800;cursor:pointer;">🐢 No Timer<br><span style="font-size:.67rem;font-weight:600;opacity:.8;">Take your time</span></button>' +
+        '</div>' +
+      '</div>' +
+      '<div style="margin-bottom:16px;">' +
+        '<div style="font-size:.72rem;font-weight:900;color:var(--muted2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">📝 Questions</div>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<button class="ptcb" type="button" onclick="selectQCount(10)" style="flex:1;padding:10px 4px;border-radius:10px;border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--muted2);font-size:.85rem;font-weight:800;cursor:pointer;">10</button>' +
+          '<button class="ptcb" type="button" onclick="selectQCount(' + c20 + ')" style="flex:1;padding:10px 4px;border-radius:10px;border:2px solid var(--amber);background:rgba(245,158,11,.12);color:var(--amber);font-size:.85rem;font-weight:800;cursor:pointer;">' + c20 + '</button>' +
+          '<button class="ptcb" type="button" onclick="selectQCount(' + c30 + ')" style="flex:1;padding:10px 4px;border-radius:10px;border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--muted2);font-size:.85rem;font-weight:800;cursor:pointer;">' + c30 + '</button>' +
+          '<button class="ptcb" type="button" onclick="selectQCount(' + qMax + ')" style="flex:1;padding:10px 4px;border-radius:10px;border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--muted2);font-size:.75rem;font-weight:700;cursor:pointer;">All<br><span style="font-size:.6rem;">' + qMax + '</span></button>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:10px;">' +
+        '<button type="button" onclick="closePretestModal()" style="flex:0 0 44px;padding:12px;border-radius:12px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:var(--muted2);font-size:.9rem;cursor:pointer;">✕</button>' +
+        '<button type="button" onclick="launchPreTest()" style="flex:1;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--teal),var(--purple));color:#fff;font-size:.92rem;font-weight:900;cursor:pointer;">🚀 Start Test!</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+  selectQCount(window._pretestCount);
+}
+
+function selectTimerMode(timed) {
+  window._pretestTimed = timed;
+  var tb = document.getElementById('pt-timed');
+  var ub = document.getElementById('pt-untimed');
+  if (tb) {
+    tb.style.border = timed ? '2px solid var(--teal)' : '2px solid rgba(255,255,255,.1)';
+    tb.style.background = timed ? 'rgba(14,165,233,.15)' : 'rgba(255,255,255,.04)';
+    tb.style.color = timed ? 'var(--teal)' : 'var(--muted2)';
+  }
+  if (ub) {
+    ub.style.border = !timed ? '2px solid var(--green)' : '2px solid rgba(255,255,255,.1)';
+    ub.style.background = !timed ? 'rgba(34,197,94,.12)' : 'rgba(255,255,255,.04)';
+    ub.style.color = !timed ? 'var(--green)' : 'var(--muted2)';
+  }
+}
+
+function selectQCount(n) {
+  window._pretestCount = n;
+  var qs = window._pretestQuestions || [];
+  var btns = document.getElementsByClassName('ptcb');
+  for(var i=0;i<btns.length;i++){
+    var btnN = parseInt(btns[i].textContent);
+    var isAll = btns[i].textContent.indexOf('All')===0;
+    var match = (!isAll && btnN===n) || (isAll && n>=qs.length);
+    btns[i].style.border = match ? '2px solid var(--amber)' : '2px solid rgba(255,255,255,.1)';
+    btns[i].style.background = match ? 'rgba(245,158,11,.12)' : 'rgba(255,255,255,.04)';
+    btns[i].style.color = match ? 'var(--amber)' : 'var(--muted2)';
+  }
+}
+
+function launchPreTest() {
+  var questions = window._pretestQuestions || [];
+  var count = window._pretestCount || 20;
+  var timed = window._pretestTimed !== false;
+  closePretestModal();
+  var finalQ = questions.slice(0, count);
+  resetQS();
+  QS.questions = finalQ;
+  QS.targetLen = finalQ.length;
+  QS.mode = 'banks';
+  QS.topicName = 'My Question Banks';
+  QS.timed = timed;
   go('quiz');
-  try { renderQ(); } catch(e) {}
+  buildAdaptNodes();
+  renderQ();
 }
 
 function deleteBank(id) {
@@ -2739,6 +2836,8 @@ function renderSkillMastery() {
   }
   el.innerHTML=_smH;
 }
+
+function closePretestModal() { var m=document.getElementById('pretest-modal'); if(m) m.parentNode.removeChild(m); }
 
 </script>
 
