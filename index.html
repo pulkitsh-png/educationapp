@@ -1022,7 +1022,12 @@ body::before{
 
 <!-- ▸ MY BANKS -->
 <div class="screen" id="sc-banks">
-  <div class="ph"><h1>📚 My Question Banks</h1><p>AI-generated banks from uploaded textbook pages</p></div>
+  <div class="ph"><h1>📚 My Question Banks</h1><p>Upload photos to build your bank. When ready, build a full test.</p></div>
+  <div style="display:flex;gap:10px;margin-bottom:14px;">
+    <button onclick="go('upload')" style="flex:1;padding:11px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--teal),var(--purple));color:#fff;font-size:.85rem;font-weight:800;cursor:pointer;">📸 Add Photos</button>
+    <button onclick="buildTestFromAllBanks()" style="flex:1;padding:11px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--green),var(--teal));color:#fff;font-size:.85rem;font-weight:800;cursor:pointer;">🎯 Build Full Test</button>
+  </div>
+  <div id="banks-total-bar" style="display:none;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:12px;padding:11px 14px;margin-bottom:12px;font-size:.82rem;font-weight:700;color:var(--green);"></div>
   <div id="banks-list"></div>
 </div>
 
@@ -1312,21 +1317,13 @@ function resetQS() {
 // ═══════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
   try {
-    checkApiKey();
-    renderDashboard();
-    renderTopicList();
-    renderBankTopicList();
-    setupDragDrop();
-    renderBanks();
-    renderFlags();
-    setupIOSTouchFix();
-  } catch(initErr) {
-    dbg('INIT ERROR', initErr.message + ' | ' + initErr.stack);
-    // Show error visibly even without debug panel
-    var errDiv = document.createElement('div');
-    errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#f43f5e;color:#fff;padding:12px;font-size:13px;font-weight:700;z-index:99999;word-break:break-all;';
-    errDiv.textContent = 'Init error: ' + initErr.message;
-    document.body.appendChild(errDiv);
+    checkApiKey(); renderDashboard(); renderTopicList();
+    renderBankTopicList(); setupDragDrop(); renderBanks();
+    renderFlags(); setupIOSTouchFix();
+  } catch(e) {
+    var d=document.createElement('div');
+    d.style.cssText='position:fixed;top:0;left:0;right:0;background:#f43f5e;color:#fff;padding:12px;font-size:13px;font-weight:700;z-index:99999;word-break:break-all;';
+    d.textContent='Init error: '+e.message; document.body.appendChild(d);
   }
 });
 
@@ -1352,40 +1349,40 @@ function setupIOSTouchFix() {
   }
 
   // Apply to bottom nav buttons
-  document.querySelectorAll('.bnav-item').forEach(addTouchClick);
+  var _bni=document.getElementsByClassName('bnav-item');
+  for(var _bi=0;_bi<_bni.length;_bi++) addTouchClick(_bni[_bi]);
 
-  // Apply to sidebar nav buttons (already <button> but belt-and-suspenders)
-  document.querySelectorAll('.nav').forEach(addTouchClick);
+  // Apply to sidebar nav buttons
+  var _nvi=document.getElementsByClassName('nav');
+  for(var _ni=0;_ni<_nvi.length;_ni++) addTouchClick(_nvi[_ni]);
 
-  // Apply to more-backdrop (div, needs touch fix)
-  var backdrop = document.getElementById('more-backdrop');
-  if (backdrop) addTouchClick(backdrop);
+  // Apply to more-backdrop
+  var backdrop=document.getElementById('more-backdrop');
+  if(backdrop) addTouchClick(backdrop);
 
   // Apply to upload zone
-  var uploadZone = document.getElementById('upload-zone');
-  if (uploadZone) addTouchClick(uploadZone);
-
-  // Re-apply whenever screens change (trow elements are dynamic)
-  var origGo = go;
-  // Touch fix for dynamically rendered trow elements
-  document.addEventListener('click', function(e) {
-    // Catch any missed taps — handled by onclick already
-  }, true);
+  var uploadZone=document.getElementById('upload-zone');
+  if(uploadZone) addTouchClick(uploadZone);
 
   // MutationObserver to patch dynamically added trow buttons
-  var observer = new MutationObserver(function(mutations) {
-    mutations.forEach(function(m) {
-      m.addedNodes.forEach(function(node) {
-        if (node.nodeType === 1) {
-          node.querySelectorAll && node.querySelectorAll('.trow,.bnav-item,.opt').forEach(addTouchClick);
-          if (node.classList && (node.classList.contains('trow') || node.classList.contains('opt'))) {
+  var observer=new MutationObserver(function(mutations){
+    for(var _mi=0;_mi<mutations.length;_mi++){
+      var _an=mutations[_mi].addedNodes;
+      for(var _ai=0;_ai<_an.length;_ai++){
+        var node=_an[_ai];
+        if(node.nodeType===1){
+          if(node.querySelectorAll){
+            var _qa=node.querySelectorAll('.trow,.bnav-item,.opt');
+            for(var _qi=0;_qi<_qa.length;_qi++) addTouchClick(_qa[_qi]);
+          }
+          if(node.classList&&(node.classList.contains('trow')||node.classList.contains('opt'))){
             addTouchClick(node);
           }
         }
-      });
-    });
+      }
+    }
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body,{childList:true,subtree:true});
 }
 
 // ═══════════════════════════════════════════════
@@ -1399,14 +1396,14 @@ function renderDashboard() {
   var el = document.getElementById('d-topic-list');
   if (!el) return;
   var _dh='';
-  BUILTIN.forEach(function(t){
+  for(var _dti=0;_dti<BUILTIN.length;_dti++){var t=BUILTIN[_dti];
     _dh+='<button class="trow" onclick="startTopicById(\''+t.id+'\')">'+
       '<span class="trow-ico">'+(t.icon||'📗')+'</span>'+
       '<div class="trow-info"><div class="trow-name">'+(t.topic||'')+'</div>'+
       '<div class="trow-sub">Lesson '+(t.lesson||'')+' · '+(t.njsla||'')+'</div></div>'+
       '<span class="trow-pill">'+((t.questions||[]).length)+' Qs</span>'+
       '<span class="trow-arr">›</span></button>';
-  });
+  }
   el.innerHTML=_dh;
   refreshDashboard();
 }
@@ -1453,35 +1450,31 @@ function njLevel(score) {
 //  TOPIC SELECT LIST
 // ═══════════════════════════════════════════════
 function renderTopicList() {
-  var el = document.getElementById('topic-list-builtin');
+  var el = document.getElementById('topic-list');
   if (!el) return;
   var _th='';
-  BUILTIN.forEach(function(t){
+  for(var _tti=0;_tti<BUILTIN.length;_tti++){var t=BUILTIN[_tti];
     _th+='<button class="trow" onclick="startTopicById(\''+t.id+'\')">'+
       '<span class="trow-ico">'+(t.icon||'📗')+'</span>'+
       '<div class="trow-info"><div class="trow-name">'+(t.topic||'')+'</div>'+
       '<div class="trow-sub">'+(t.njsla||'')+' · Easy / Medium / Hard</div></div>'+
       '<span class="trow-pill">'+((t.questions||[]).length)+' Qs</span>'+
       '<span class="trow-arr">›</span></button>';
-  });
+  }
   el.innerHTML=_th;
 }
 
 function renderBankTopicList() {
-  var el = document.getElementById('topic-list-banks');
+  var el = document.getElementById('bank-topic-list');
   if (!el) return;
-  if (!BANKS.length) {
-    el.innerHTML='<div class="empty"><div class="empty-ico">📭</div><p>No banks yet</p><small>Upload textbook pages to add banks</small></div>';
-    return;
-  }
   var _bh='';
-  BANKS.forEach(function(b){
+  for(var _bti=0;_bti<BANKS.length;_bti++){var b=BANKS[_bti];
     _bh+='<button class="trow" onclick="startBankById('+b.id+')">'+
       '<span class="trow-ico">📚</span>'+
       '<div class="trow-info"><div class="trow-name">'+(b.topic||'Custom Bank')+'</div>'+
       '<div class="trow-sub">'+(b.lesson||'Custom')+' · '+((b.questions||[]).length)+' questions</div></div>'+
       '<span class="trow-arr">›</span></button>';
-  });
+  }
   el.innerHTML=_bh;
 }
 
@@ -1519,8 +1512,8 @@ function startFullTest() {
   var pool = document.getElementById('test-pool').value;
 
   var all = [];
-  BUILTIN.forEach(function(b){for(var _qi=0;_qi<b.questions.length;_qi++)all.push(b.questions[_qi]);});
-  if (pool === 'all') BANKS.forEach(function(b){if(b.questions){for(var _qj=0;_qj<b.questions.length;_qj++)all.push(b.questions[_qj]);}});
+  for(var _bui=0;_bui<BUILTIN.length;_bui++){var _bub=BUILTIN[_bui];for(var _qi=0;_qi<_bub.questions.length;_qi++)all.push(_bub.questions[_qi]);}
+  if(pool==='all'){for(var _bki=0;_bki<BANKS.length;_bki++){var _bkb=BANKS[_bki];if(_bkb.questions){for(var _qj=0;_qj<_bkb.questions.length;_qj++)all.push(_bkb.questions[_qj]);}}}
 
   var easy   = shuffle(all.filter(function(q){return q.diff==='easy';}));
   var medium = shuffle(all.filter(function(q){return q.diff==='medium';}));
@@ -1844,9 +1837,8 @@ function showResult() {
   // Badge check
   var oldBadges = (P.badges || []).slice();
   var newlyEarned = [];
-  BADGES.forEach(function(b) {
-    if (!oldBadges.indexOf(b.id) !== -1&& b.check(P)) { P.badges.push(b.id); newlyEarned.push(b); }
-  });
+  for(var _bdgi=0;_bdgi<BADGES.length;_bdgi++){var b=BADGES[_bdgi];
+    if(oldBadges.indexOf(b.id)===-1&&b.check(P)){P.badges.push(b.id);newlyEarned.push(b);}  }
 
   // History
   P.testHistory = P.testHistory || [];
@@ -1888,10 +1880,7 @@ function showResult() {
   if (plBadge) { plBadge.textContent = label; plBadge.className = 'pl-badge ' + cls; }
 
   // Highlight performance band
-  [1,2,3,4].forEach(function(l) {
-    var pb = document.getElementById('pb' + l);
-    if (pb) pb.className = 'pb pb' + l + (l === level ? ' active-pb' : '');
-  });
+  for(var l=1;l<=4;l++){var pb=document.getElementById('pb'+l);if(pb)pb.className='pb pb'+l+(l===level?' active-pb':'');}
 
   // Skill breakdown
   buildSkillBreakdown('r-skill-breakdown');
@@ -1913,23 +1902,23 @@ function showResult() {
 
 function buildSkillBreakdown(targetId) {
   var skillMap = {};
-  QS.questions.forEach(function(q, i) {
-    if (i >= QS.answers.length) return;
-    var sk = q.skill || 'General';
-    if (!skillMap[sk]) skillMap[sk] = { c:0, t:0 };
+  for(var _rhi=0;_rhi<QS.questions.length;_rhi++){var q=QS.questions[_rhi];var i=_rhi;
+    if(i>=QS.answers.length){continue;}
+    var sk=q.skill||'General';
+    if(!skillMap[sk]) skillMap[sk]={c:0,t:0};
     skillMap[sk].t++;
-    if (QS.answers[i]) skillMap[sk].c++;
-  });
+    if(QS.answers[i]) skillMap[sk].c++;
+  }
   var el = document.getElementById(targetId);
   if (!el || !Object.keys(skillMap).length) { if(el) el.innerHTML=''; return; }
   var _skH='<div class="skill-breakdown"><div class="sb-title">📊 Skill Breakdown</div>';
-  Object.keys(skillMap).forEach(function(sk){
+  var _sks=Object.keys(skillMap);for(var _ski=0;_ski<_sks.length;_ski++){var sk=_sks[_ski];
     var v=skillMap[sk];
     var p=Math.round(v.c/v.t*100);
     var c=p>=75?'var(--green)':p>=50?'var(--amber)':'var(--red)';
     _skH+='<div class="sk-row"><div class="sk-top"><span>'+sk+'</span><span style="color:'+c+'">'+v.c+'/'+v.t+' · '+p+'%</span></div>'+
       '<div class="sk-bar"><div class="sk-fill" style="width:'+p+'%;background:'+c+';"></div></div></div>';
-  });
+  }
   _skH+='</div>';
   el.innerHTML=_skH;}
 
@@ -1961,12 +1950,12 @@ function renderAllBadges() {
 // ═══════════════════════════════════════════════
 //  UPLOAD & AI GENERATE
 // ═══════════════════════════════════════════════
-var _uploadB64 = null, _uploadMime = null, _multiFiles = [];
+var _uploadB64 = null, _uploadMime = null;
 
 function compressB64(canvas, maxBytes) {
-  var quality = 0.6;
+  var quality = 0.65;
   var b64 = canvas.toDataURL("image/jpeg", quality).split(",")[1];
-  while (b64.length > maxBytes && quality > 0.15) {
+  while (b64.length > maxBytes && quality > 0.2) {
     quality = Math.round((quality - 0.1) * 10) / 10;
     b64 = canvas.toDataURL("image/jpeg", quality).split(",")[1];
   }
@@ -1979,7 +1968,7 @@ function convertToJpegSized(file, maxBytes, callback) {
     var img = new Image();
     img.onload = function() {
       var canvas = document.createElement("canvas");
-      var MAX = 600;
+      var MAX = 800;
       var w = img.width, h = img.height;
       if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
       if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
@@ -2011,7 +2000,7 @@ function handleFile(e) {
   _multiFiles = [];
   var total = selected.length;
   var done = 0;
-  var perImageMax = Math.floor(900000 / total);  // 900KB total split across images
+  var perImageMax = Math.floor(2800000 / total);
   dbg("Multi-upload", {total:total, perImageMaxKB: Math.round(perImageMax/1024)+"KB"});
   for (var hfi = 0; hfi < selected.length; hfi++) {
     (function(file) {
@@ -2049,73 +2038,41 @@ function setupDragDrop() {
   });
 }
 
-function compressCanvas(canvas, maxB64Bytes) {
-  var quality = 0.65;
-  var b64 = canvas.toDataURL("image/jpeg", quality).split(",")[1];
-  while (b64.length > maxB64Bytes && quality > 0.15) {
-    quality = Math.round((quality - 0.1) * 10) / 10;
-    b64 = canvas.toDataURL("image/jpeg", quality).split(",")[1];
-  }
-  return b64.replace(/[\s\r\n]/g, "");
-}
-
-function bitmapToB64(bitmap) {
-  var MAX = 800;
-  var w = bitmap.width, h = bitmap.height;
-  if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
-  if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
-  var canvas = document.createElement("canvas");
-  canvas.width = w; canvas.height = h;
-  var ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, w, h);
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  var b64 = compressCanvas(canvas, 900000);
-  dbg("Photo compressed", {w:w, h:h, kb: Math.round(b64.length/1024)+"KB", prefix: b64.slice(0,6)});
-  return b64;
-}
-
 function convertToJpeg(file, callback) {
-  // Try via object URL (works for HEIC on Safari iOS 16+, and all JPEG/PNG)
-  var objectUrl = URL.createObjectURL(file);
-  var img = new Image();
-  img.onload = function() {
-    var b64 = bitmapToB64(img);
-    URL.revokeObjectURL(objectUrl);
-    callback("image/jpeg", b64, "data:image/jpeg;base64,"+b64);
-  };
-  img.onerror = function() {
-    URL.revokeObjectURL(objectUrl);
-    dbg("Object URL failed, trying FileReader");
-    // Fallback: FileReader -> data URL
-    var reader = new FileReader();
-    reader.onload = function(ev) {
-      var dataUrl = ev.target.result;
-      var img2 = new Image();
-      img2.onload = function() {
-        var b64 = bitmapToB64(img2);
-        callback("image/jpeg", b64, "data:image/jpeg;base64,"+b64);
-      };
-      img2.onerror = function() {
-        // Last resort: createImageBitmap
-        dbg("FileReader img failed, trying createImageBitmap");
-        if (window.createImageBitmap) {
-          createImageBitmap(file).then(function(bm) {
-            var b64 = bitmapToB64(bm);
-            callback("image/jpeg", b64, "data:image/jpeg;base64,"+b64);
-          }).catch(function(e) {
-            dbg("All methods failed: "+e.message);
-            showGenError("Cannot decode this image. Go to iPhone Settings > Camera > Formats > Most Compatible to shoot in JPEG.");
-          });
-        } else {
-          showGenError("Cannot decode this image format. Go to iPhone Settings > Camera > Formats > Most Compatible.");
-        }
-      };
-      img2.src = dataUrl;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var img = new Image();
+    img.onload = function() {
+      var canvas = document.createElement("canvas");
+      var MAX = 1024;
+      var w = img.width, h = img.height;
+      if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+      if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+      canvas.width = w; canvas.height = h;
+      var ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      var quality = 0.75;
+      var dataUrl = canvas.toDataURL("image/jpeg", quality);
+      var b64 = dataUrl.split(",")[1];
+      var MAX_B64 = 2800000;
+      while (b64.length > MAX_B64 && quality > 0.3) {
+        quality -= 0.1;
+        dataUrl = canvas.toDataURL("image/jpeg", quality);
+        b64 = dataUrl.split(",")[1];
+      }
+      dbg("Image compressed", {w:w, h:h, quality:quality, b64kb: Math.round(b64.length/1024)+"KB"});
+      callback("image/jpeg", b64, dataUrl);
     };
-    reader.readAsDataURL(file);
+    img.onerror = function() {
+      var parts = ev.target.result.split(",");
+      var mime = parts[0].match(/:(.*?);/)[1];
+      callback(mime, parts[1], ev.target.result);
+    };
+    img.src = ev.target.result;
   };
-  img.src = objectUrl;
+  reader.readAsDataURL(file);
 }
 
 function processFile(file) {
@@ -2182,24 +2139,21 @@ function generateQs() {
   var contentArr = [];
   contentArr.push({ type:"text", text: promptText });
   if (_multiFiles && _multiFiles.length > 1) {
-    var maxImgs = Math.min(_multiFiles.length, 4);
+    var maxImgs = Math.min(_multiFiles.length, 5);
     for (var fi = 0; fi < maxImgs; fi++) {
       var f = _multiFiles[fi];
-      var fMime = "image/jpeg"; // always force jpeg for Groq
-      contentArr.push({ type:"image_url", image_url:{ url:"data:"+fMime+";base64,"+f.b64 } });
+      contentArr.push({ type:"image_url", image_url:{ url:"data:"+f.mime+";base64,"+f.b64 } });
     }
     dbg("Sending "+maxImgs+" images to Groq");
   } else {
-    var cleanB64 = (_uploadB64 || "").replace(/\s/g, "");
-    dbg("Single image b64 prefix", cleanB64.slice(0,30)+"...");
-    dbg("Single image b64 length", cleanB64.length);
-    contentArr.push({ type:"image_url", image_url:{ url:"data:image/jpeg;base64,"+cleanB64 } });
+    var mime = sanitizeMime(_uploadMime);
+    contentArr.push({ type:"image_url", image_url:{ url:"data:"+mime+";base64,"+_uploadB64 } });
     dbg("Sending 1 image to Groq");
   }
   var bodyStr = JSON.stringify({
     model: "meta-llama/llama-4-scout-17b-16e-instruct",
     messages: [{ role:"user", content: contentArr }],
-    max_completion_tokens: 2000,
+    max_tokens: 4000,
     temperature: 0.4
   });
   var url = "https://api.groq.com/openai/v1/chat/completions";
@@ -2235,7 +2189,14 @@ function generateQs() {
     BANKS.push(bank); saveBanks(); renderBanks(); renderBankTopicList();
     window._genBank = bank; showGenPreview(bank);
     dbg("SUCCESS - bank saved, showing preview");
-    showToast(valid.length + " questions generated!");
+    showToast(valid.length + ' questions added to bank!');
+    var errBox = document.getElementById('gen-error-box');
+    if (errBox) {
+      errBox.style.cssText='display:block;background:rgba(34,197,94,.1);border:1.5px solid var(--green);border-radius:13px;padding:14px;margin-top:14px;color:var(--green);font-size:.85rem;font-weight:700;line-height:1.8;';
+      errBox.innerHTML='✅ '+valid.length+' questions added to your bank!<br>'+
+        '<span style="font-size:.78rem;color:var(--muted2);">Upload another photo or go build your test</span><br>'+
+        '<button onclick="go(\'banks\')" style="margin-top:8px;padding:8px 18px;border-radius:10px;border:none;background:linear-gradient(135deg,var(--green),var(--teal));color:#fff;font-weight:800;font-size:.82rem;cursor:pointer;">📚 View Banks & Build Test →</button>';
+    }
     doneLoading();
   })
   .catch(function(fetchErr) {
@@ -2258,13 +2219,13 @@ function showGenPreview(bank) {
     '<div style="font-weight:700;color:var(--teal);margin-bottom:4px;">📚 '+( bank.topic||'New Bank')+
     (bank.lesson?' · Lesson '+bank.lesson:'')+
     '</div><div style="font-size:.73rem;color:var(--muted2);">'+bank.questions.length+' questions generated</div></div>';
-  bank.questions.slice(0,4).forEach(function(q,i){
+  var _pqs=bank.questions.slice(0,4);for(var _pqi=0;_pqi<_pqs.length;_pqi++){var q=_pqs[_pqi];var i=_pqi;
     _gh+='<div class="gen-q">'+
       '<div class="gen-q-text">'+(q.diff==='hard'?'🔴':q.diff==='medium'?'🟡':'🟢')+' '+(q.q||'')+'</div>'+
       '<div class="gen-q-ans">✅ Correct: '+((q.opts||[])[q.ans]||'')+'</div>'+
       '<div class="gen-q-exp">'+(q.exp||'')+'</div>'+
       '<div class="qp-wrong">❌ Distractors: '+(q.opts||[]).filter(function(_,j){return j!==q.ans;}).join(' · ')+'</div></div>';
-  });
+  }
   if(bank.questions.length>4) _gh+='<p style="color:var(--muted2);font-size:.73rem;text-align:center;">...and '+(bank.questions.length-4)+' more</p>';
   gl.innerHTML=_gh;
   el.style.display='block';
@@ -2276,29 +2237,48 @@ function showGenPreview(bank) {
 function renderBanks() {
   var el = document.getElementById('banks-list');
   if (!el) return;
+  var totalQ = 0;
+  for(var _rbi=0;_rbi<BANKS.length;_rbi++){totalQ+=(BANKS[_rbi].questions||[]).length;}
+  var bar = document.getElementById('banks-total-bar');
+  if (bar) {
+    if (BANKS.length) { bar.style.display='block'; bar.textContent='📊 '+BANKS.length+' bank'+(BANKS.length!==1?'s':'')+' · '+totalQ+' total questions ready'; }
+    else { bar.style.display='none'; }
+  }
   if (!BANKS.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-ico">📭</div><p>No banks yet</p><small>Upload textbook pages to create question banks</small><br><button class="btn-am" style="margin-top:16px;padding:10px 22px;" onclick="go(\'upload\')">📸 Upload Now</button></div>';
+    el.innerHTML='<div class="empty"><div class="empty-ico">📭</div><p>No banks yet</p><small>Upload textbook photos to build your question bank</small><br><button class="btn-am" style="margin-top:16px;padding:10px 22px;" onclick="go(\'upload\')">📸 Upload Now</button></div>';
     return;
   }
-  el.innerHTML = '<div class="g2">' + BANKS.map(function(b) {
-    var qs = b.questions || [];
-    var skills = [];
-    var seen = {};
-    qs.forEach(function(q) { if (q.skill && !seen[q.skill]) { seen[q.skill]=1; skills.push(q.skill); } });
-    skills = skills.slice(0,5);
-    return '<div class="bank-card">' +
-      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;">' +
-        '<div><div class="bank-name">📚 ' + (b.topic||'Custom Bank') + '</div>' +
-        '<div class="bank-sub">' + (b.lesson||'Custom') + '</div></div>' +
-        '<span style="background:rgba(34,197,94,.15);color:var(--green);border-radius:999px;padding:3px 9px;font-size:.68rem;font-weight:800;">' + qs.length + ' Qs</span>' +
-      '</div>' +
-      '<div class="skill-tags">' + skills.map(function(s){return '<span class="stag">'+s+'</span>';}).join('') + '</div>' +
-      '<div class="bank-btns">' +
-        '<button class="bxs bxs-t" onclick="startBankById(' + b.id + ')">🎯 Start Quiz</button> ' +
-        '<button class="bxs bxs-r" onclick="deleteBank(' + b.id + ')">🗑 Delete</button>' +
-      '</div>' +
-    '</div>';
-  }).join('') + '</div>';
+  el.innerHTML='<div class="g2">'+BANKS.map(function(b){
+    var qs=b.questions||[];
+    var skills=[]; var seen={};
+    for(var _sqi=0;_sqi<qs.length;_sqi++){var _sq=qs[_sqi];if(_sq.skill&&!seen[_sq.skill]){seen[_sq.skill]=1;skills.push(_sq.skill);}}
+    return '<div class="bank-card">'+
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;">'+
+        '<div><div class="bank-name">📚 '+(b.topic||'Custom Bank')+'</div>'+
+        '<div class="bank-sub">'+(b.lesson||'Custom')+' · '+qs.length+' questions</div></div>'+
+        '<span style="background:rgba(34,197,94,.15);color:var(--green);border-radius:999px;padding:3px 9px;font-size:.68rem;font-weight:800;">'+qs.length+' Qs</span>'+
+      '</div>'+
+      '<div class="skill-tags">'+skills.slice(0,5).map(function(s){return '<span class="stag">'+s+'</span>';}).join('')+'</div>'+
+      '<div class="bank-btns">'+
+        '<button class="bxs bxs-t" onclick="startBankById('+b.id+')">🎯 Quiz This Bank</button> '+
+        '<button class="bxs bxs-r" onclick="deleteBank('+b.id+')">🗑 Delete</button>'+
+      '</div></div>';
+  }).join('')+'</div>';
+}
+
+function buildTestFromAllBanks() {
+  var allQ = [];
+  for(var _abi=0;_abi<BANKS.length;_abi++){var _abqs=BANKS[_abi].questions||[];for(var _aqi=0;_aqi<_abqs.length;_aqi++){allQ.push(_abqs[_aqi]);}}
+  if (!allQ.length) { showToast('No questions yet! Upload textbook photos first.'); return; }
+  for (var i=allQ.length-1; i>0; i--) {
+    var j=Math.floor(Math.random()*(i+1)); var tmp=allQ[i]; allQ[i]=allQ[j]; allQ[j]=tmp;
+  }
+  allQ = allQ.slice(0,40);
+  QS = allQ;
+  window._qIdx=0; window._correct=0; window._wrong=0; window._streak=0;
+  showToast('Starting test with '+allQ.length+' questions!');
+  go('quiz');
+  try { renderQ(); } catch(e) {}
 }
 
 function deleteBank(id) {
@@ -2384,38 +2364,35 @@ function saveProxy() {
 
 
 function testApiKey() {
-  var keyEl = document.getElementById("api-key-input");
-  var resultEl = document.getElementById("key-test-result");
-  var btn = document.getElementById("test-key-btn");
-  var key = (keyEl ? keyEl.value.trim() : "") || P.apiKey || "";
+  var keyEl = document.getElementById('api-key-input');
+  var resultEl = document.getElementById('key-test-result');
+  var btn = document.getElementById('test-key-btn');
+  var key = (keyEl ? keyEl.value.trim() : '') || P.apiKey || '';
   if (!key) {
-    if (resultEl) { resultEl.style.cssText="display:block;background:rgba(244,63,94,.1);border:1px solid #f43f5e;border-radius:10px;padding:12px;margin-top:10px;color:#f43f5e;font-size:.8rem;font-weight:700;"; resultEl.textContent="No API key entered."; }
+    if (resultEl) { resultEl.style.cssText='display:block;background:rgba(244,63,94,.1);border:1px solid #f43f5e;border-radius:10px;padding:12px;margin-top:10px;color:#f43f5e;font-size:.8rem;font-weight:700;'; resultEl.textContent='No API key entered.'; }
     return;
   }
-  if (resultEl) { resultEl.style.cssText="display:block;background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.3);border-radius:10px;padding:12px;margin-top:10px;color:var(--teal);font-size:.8rem;font-weight:700;"; resultEl.textContent="Testing Groq API key..."; }
-  if (btn) btn.disabled = true;
-  var testUrl = "https://api.groq.com/openai/v1/chat/completions";
-  var testBody = JSON.stringify({ model:"meta-llama/llama-4-scout-17b-16e-instruct", messages:[{role:"user",content:"Reply with just the word OK"}], max_tokens:5 });
-  dbg("testApiKey: key length="+key.length+", prefix="+key.slice(0,8));
-  fetch(testUrl, { method:"POST", mode:"cors", headers:{ "content-type":"application/json", "authorization":"Bearer "+key }, body:testBody })
-  .then(function(resp) { return resp.text().then(function(txt) { return { status:resp.status, ok:resp.ok, txt:txt }; }); })
-  .then(function(r) {
-    if (btn) btn.disabled = false;
-    if (!resultEl) return;
-    if (r.ok) {
-      resultEl.style.cssText = "display:block;background:rgba(34,197,94,.1);border:1px solid #22c55e;border-radius:10px;padding:12px;margin-top:10px;color:var(--green);font-size:.8rem;font-weight:700;";
-      resultEl.textContent = "✅ Groq API key works! Ready to generate questions from photos.";
-      P.apiKey = key; saveProgress(); checkApiKey();
+  if (resultEl) { resultEl.style.cssText='display:block;background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.3);border-radius:10px;padding:12px;margin-top:10px;color:var(--teal);font-size:.8rem;font-weight:700;'; resultEl.textContent='Testing Groq API key...'; }
+  if (btn) btn.disabled=true;
+  fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method:'POST', mode:'cors',
+    headers:{'content-type':'application/json','authorization':'Bearer '+key},
+    body:JSON.stringify({model:'meta-llama/llama-4-scout-17b-16e-instruct',messages:[{role:'user',content:'Reply OK'}],max_completion_tokens:5})
+  }).then(function(resp){return resp.text().then(function(t){return{ok:resp.ok,status:resp.status,t:t};});})
+  .then(function(r){
+    if(btn) btn.disabled=false;
+    if(!resultEl) return;
+    if(r.ok){
+      resultEl.style.cssText='display:block;background:rgba(34,197,94,.1);border:1px solid #22c55e;border-radius:10px;padding:12px;margin-top:10px;color:var(--green);font-size:.8rem;font-weight:700;';
+      resultEl.textContent='✅ Groq API key works!';
+      P.apiKey=key; saveProgress(); checkApiKey();
     } else {
-      resultEl.style.cssText = "display:block;background:rgba(244,63,94,.1);border:1px solid #f43f5e;border-radius:10px;padding:12px;margin-top:10px;color:#f43f5e;font-size:.78rem;font-weight:700;word-break:break-all;";
-      resultEl.textContent = "❌ Error " + r.status + ": " + r.txt.slice(0,300);
+      resultEl.style.cssText='display:block;background:rgba(244,63,94,.1);border:1px solid #f43f5e;border-radius:10px;padding:12px;margin-top:10px;color:#f43f5e;font-size:.78rem;font-weight:700;word-break:break-all;';
+      resultEl.textContent='❌ Error '+r.status+': '+r.t.slice(0,200);
     }
-  })
-  .catch(function(e) {
-    if (btn) btn.disabled = false;
-    var errMsg = "❌ Network error: "+e.message+" | name="+e.name+" | key_len="+(key?key.length:0)+" | origin="+window.location.origin;
-    dbg("FETCH ERROR", errMsg);
-    if (resultEl) { resultEl.style.cssText="display:block;background:rgba(244,63,94,.1);border:1px solid #f43f5e;border-radius:10px;padding:12px;margin-top:10px;color:#f43f5e;font-size:.78rem;font-weight:700;word-break:break-all;"; resultEl.textContent=errMsg; }
+  }).catch(function(e){
+    if(btn) btn.disabled=false;
+    if(resultEl){resultEl.style.cssText='display:block;background:rgba(244,63,94,.1);border:1px solid #f43f5e;border-radius:10px;padding:12px;margin-top:10px;color:#f43f5e;font-size:.78rem;font-weight:700;';resultEl.textContent='❌ '+e.message+'  key_len='+(key?key.length:0);}
   });
 }
 
@@ -2456,12 +2433,12 @@ function confetti() {
   var fr = 0;
   (function draw() {
     ctx.clearRect(0,0,c.width,c.height);
-    pieces.forEach(function(p) {
-      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-      ctx.fillStyle = p.col; ctx.fill();
-      p.y += p.d*.55; p.ta += p.ts; p.x += Math.sin(p.ta)*1.8;
-      if (p.y > c.height) { p.y=-10; p.x=Math.random()*c.width; }
-    });
+    for(var _ci=0;_ci<pieces.length;_ci++){var p=pieces[_ci];
+      ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      ctx.fillStyle=p.col;ctx.fill();
+      p.y+=p.d*.55;p.ta+=p.ts;p.x+=Math.sin(p.ta)*1.8;
+      if(p.y>c.height){p.y=-10;p.x=Math.random()*c.width;}
+    }
     if (++fr < 240) requestAnimationFrame(draw);
     else ctx.clearRect(0,0,c.width,c.height);
   })();
@@ -2478,17 +2455,6 @@ function shuffle(arr) {
 function goMobile(name) {
   closeMoreMenu();
   go(name);
-  // Sync bottom nav active state
-  document.querySelectorAll('.bnav-item').forEach(function(b){b.classList.remove('on');});
-  var mobileNavIds = ['home','topic','fulltest','upload'];
-  if (mobileNavIds.indexOf(name) !== -1) {
-    var btn = document.getElementById('bnav-' + name);
-    if (btn) btn.classList.add('on');
-  } else {
-    // "More" items — keep More button highlighted
-    var moreBtn = document.getElementById('bnav-more');
-    if (moreBtn) moreBtn.classList.add('on');
-  }
 }
 
 function toggleMoreMenu() {
@@ -2535,35 +2501,27 @@ function openCapture(captureMode) {
 var _goOriginal = go;
 // (We redefine go to also handle bottom nav sync on mobile)
 function go(name) {
-  // Hide all screens - use old-style loop for max compatibility
   var screens = document.getElementsByClassName('screen');
-  for (var si = 0; si < screens.length; si++) { screens[si].classList.remove('on'); }
+  for (var si=0; si<screens.length; si++) { screens[si].classList.remove('on'); }
   var navs = document.getElementsByClassName('nav');
-  for (var ni = 0; ni < navs.length; ni++) { navs[ni].classList.remove('on'); }
+  for (var ni=0; ni<navs.length; ni++) { navs[ni].classList.remove('on'); }
   var bnavs = document.getElementsByClassName('bnav-item');
-  for (var bi = 0; bi < bnavs.length; bi++) { bnavs[bi].classList.remove('on'); }
-  // Show target screen
-  var sc = document.getElementById('sc-' + name);
-  var nv = document.getElementById('nav-' + name);
+  for (var bi=0; bi<bnavs.length; bi++) { bnavs[bi].classList.remove('on'); }
+  var sc = document.getElementById('sc-'+name);
+  var nv = document.getElementById('nav-'+name);
   if (sc) sc.classList.add('on');
   if (nv) nv.classList.add('on');
-  // Sync bottom nav highlight
   var mobileNavIds = ['home','topic','fulltest','upload'];
-  if (mobileNavIds.indexOf(name) !== -1) {
-    var btn = document.getElementById('bnav-' + name);
+  if (mobileNavIds.indexOf(name)!==-1) {
+    var btn = document.getElementById('bnav-'+name);
     if (btn) btn.classList.add('on');
   }
-  // Screen-specific callbacks
-  if (name === 'home') { try { refreshDashboard(); } catch(e) {} }
-  if (name === 'progress') { try { renderAllBadges(); renderHistory(); renderSkillMastery(); } catch(e) {} }
-  if (name === 'banks') { try { renderBanks(); } catch(e) {} }
-  if (name === 'flagged') { try { renderFlags(); } catch(e) {} }
-  if (name === 'settings') {
-    var ki = document.getElementById('api-key-input');
-    if (ki && P.apiKey) ki.value = P.apiKey;
-  }
-  // Scroll to top
-  try { window.scrollTo(0, 0); } catch(e) {}
+  if (name==='home') { try { refreshDashboard(); } catch(e){} }
+  if (name==='progress') { try { renderAllBadges(); renderHistory(); renderSkillMastery(); } catch(e){} }
+  if (name==='banks') { try { renderBanks(); } catch(e){} }
+  if (name==='flagged') { try { renderFlags(); } catch(e){} }
+  if (name==='settings') { var ki=document.getElementById('api-key-input'); if(ki&&P.apiKey) ki.value=P.apiKey; }
+  try { window.scrollTo(0,0); } catch(e){}
 }
 
 
@@ -2572,36 +2530,39 @@ function renderHistory() {
   var el = document.getElementById('history-wrap');
   if (!el) return;
   if (!h.length) { el.innerHTML='<div class="empty"><div class="empty-ico">📭</div><p>No tests yet</p></div>'; return; }
-  var _hT = '<div style="overflow-x:auto"><table class="htable"><thead><tr><th>Date</th><th>Topic</th><th>Score</th><th>NJ Scale</th><th>Level</th><th>Stars</th></tr></thead><tbody>';
-  h.forEach(function(r) {
-    var lc = ['','pl1','pl2','pl3','pl4'][r.level] || 'pl1';
-    _hT += '<tr><td>'+(r.date||'')+'</td>'+
+  var _hT='<div style="overflow-x:auto"><table class="htable"><thead><tr><th>Date</th><th>Topic</th><th>Score</th><th>NJ Scale</th><th>Level</th><th>Stars</th></tr></thead><tbody>';
+  for(var _hi=0;_hi<h.length;_hi++){
+    var r=h[_hi];
+    var lc=['','pl1','pl2','pl3','pl4'][r.level]||'pl1';
+    _hT+='<tr><td>'+(r.date||'')+'</td>'+
       '<td style="font-size:.75rem">'+(r.topic||'—')+'</td>'+
-      '<td>'+(r.correct||0)+'/'+(r.total||0)+' <span style="color:var(--muted2);font-size:.75rem">('+(r.acc||0)+'%)</span></td>'+
+      '<td>'+(r.correct||0)+'/'+(r.total||0)+' <span style="color:var(--muted2);font-size:.75rem">('+( r.acc||0)+'%)</span></td>'+
       '<td class="mono">'+(r.score||'—')+'</td>'+
       '<td><span class="pl-badge '+lc+'" style="font-size:.62rem;padding:2px 8px;">L'+(r.level||1)+'</span></td>'+
       '<td style="color:var(--amber)">⭐'+(r.stars||0)+'</td></tr>';
-  });
-  _hT += '</tbody></table></div>';
-  el.innerHTML = _hT;
+  }
+  _hT+='</tbody></table></div>';
+  el.innerHTML=_hT;
 }
 
 function renderSkillMastery() {
   var el = document.getElementById('skill-mastery-wrap');
   if (!el) return;
-  var last5 = (P.testHistory || []).slice(-5).reverse();
-  if (!last5.length) { el.innerHTML = '<div class="empty"><div class="empty-ico">📊</div><p>Complete tests to see trends</p></div>'; return; }
-  var _smH = '<div style="font-size:.62rem;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin-bottom:10px;">Score Trend (Last 5 Tests)</div>';
-  last5.forEach(function(r) {
-    var _p = Math.min(100, ((r.score||650)-650)/200*100);
-    var _nj = njLevel(r.score||650);
-    _smH += '<div style="margin-bottom:9px;">'+
+  var last5=(P.testHistory||[]).slice(-5).reverse();
+  if (!last5.length) { el.innerHTML='<div class="empty"><div class="empty-ico">📊</div><p>Complete tests to see trends</p></div>'; return; }
+  var _smH='<div style="font-size:.62rem;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin-bottom:10px;">Score Trend (Last 5 Tests)</div>';
+  for(var _l5i=0;_l5i<last5.length;_l5i++){
+    var r=last5[_l5i];
+    var _p=Math.min(100,((r.score||650)-650)/200*100);
+    var _nj=njLevel(r.score||650);
+    _smH+='<div style="margin-bottom:9px;">'+
       '<div style="display:flex;justify-content:space-between;font-size:.76rem;font-weight:700;color:var(--muted2);margin-bottom:3px;">'+
       '<span style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(r.topic||'Test')+' — '+(r.date||'')+'</span>'+
-      '<span class="pl-badge '+_nj.cls+'" style="font-size:.6rem;padding:2px 8px;">'+(r.score||'—')+'</span></div>'+
-      '<div class="nj-bar-bg" style="height:5px;"><div class="nj-fill" style="width:'+_p+'%;background:linear-gradient(90deg,var(--amber),var(--teal))"></div></div></div>';
-  });
-  el.innerHTML = _smH;
+      '<span style="color:'+((_p>=75)?'var(--green)':(_p>=50)?'var(--amber)':'var(--red)')+'">'+Math.round(_p)+'%</span></div>'+
+      '<div style="background:rgba(255,255,255,.06);border-radius:999px;height:7px;overflow:hidden;">'+
+      '<div style="height:100%;width:'+_p+'%;background:'+((_p>=75)?'var(--green)':(_p>=50)?'var(--amber)':'var(--red)')+';border-radius:999px;transition:width .6s ease;"></div></div></div>';
+  }
+  el.innerHTML=_smH;
 }
 
 </script>
