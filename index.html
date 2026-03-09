@@ -1536,7 +1536,8 @@ function njLevel(score) {
 //  TOPIC SELECT LIST
 // ═══════════════════════════════════════════════
 function renderTopicList() {
-  var el = document.getElementById('topic-list');
+  var el = document.getElementById('topic-list-builtin');
+  if (!el) { el = document.getElementById('topic-list'); }
   if (!el) return;
   var _th='';
   for(var _tti=0;_tti<BUILTIN.length;_tti++){var t=BUILTIN[_tti];
@@ -1551,14 +1552,21 @@ function renderTopicList() {
 }
 
 function renderBankTopicList() {
-  var el = document.getElementById('bank-topic-list');
+  var el = document.getElementById('topic-list-banks');
+  if (!el) { el = document.getElementById('bank-topic-list'); }
   if (!el) return;
+  if (!BANKS.length) {
+    el.innerHTML='<div class="empty"><div class="empty-ico">📭</div><p>No banks yet</p><small>Upload textbook pages to add banks</small><br><button class="btn-am" style="margin-top:12px;padding:9px 18px;" onclick="go(\'upload\')">📸 Upload Now</button></div>';
+    return;
+  }
   var _bh='';
   for(var _bti=0;_bti<BANKS.length;_bti++){var b=BANKS[_bti];
+    var qs=(b.questions||[]).length;
     _bh+='<button class="trow" onclick="startBankById('+b.id+')">'+
       '<span class="trow-ico">📚</span>'+
       '<div class="trow-info"><div class="trow-name">'+(b.topic||'Custom Bank')+'</div>'+
-      '<div class="trow-sub">'+(b.lesson||'Custom')+' · '+((b.questions||[]).length)+' questions</div></div>'+
+      '<div class="trow-sub">'+(b.lesson||'Custom')+' · '+qs+' question'+(qs!==1?'s':'')+'</div></div>'+
+      '<span class="trow-pill">'+qs+' Qs</span>'+
       '<span class="trow-arr">›</span></button>';
   }
   el.innerHTML=_bh;
@@ -2808,6 +2816,7 @@ function goForce(name) {
   if (name==='home') { try { refreshDashboard(); } catch(e){} }
   if (name==='progress') { try { renderAllBadges(); renderHistory(); renderSkillMastery(); } catch(e){} }
   if (name==='banks') { try { renderBanks(); } catch(e){} }
+  if (name==='topic') { try { renderTopicList(); renderBankTopicList(); } catch(e){} }
   if (name==='flagged') { try { renderFlags(); } catch(e){} }
   if (name==='settings') { var ki=document.getElementById('api-key-input'); if(ki&&P.apiKey) ki.value=P.apiKey; }
   try { window.scrollTo(0,0); } catch(e){}
