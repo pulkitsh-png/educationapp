@@ -2648,31 +2648,52 @@ function showPreTestDialog(questions, topicName, bankCount) {
   overlay.id = 'pretest-modal';
   overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;';
 
-  var c20 = Math.min(20, qMax);
-  var c30 = Math.min(30, qMax);
+  // Build smart unique count options — never show impossible or duplicate values
+  var _candidates = [5, 10, 15, 20, 25, 30, 40];
+  var _opts = [];
+  for (var _ci=0; _ci<_candidates.length; _ci++) {
+    if (_candidates[_ci] < qMax) _opts.push(_candidates[_ci]);
+  }
+  // Keep at most 3 intermediate options so we have room for 'All'
+  if (_opts.length > 3) _opts = _opts.slice(_opts.length - 3);
+  // Default selection: last intermediate option, or qMax if no intermediates
+  var _defaultCount = _opts.length ? _opts[_opts.length-1] : qMax;
+  window._pretestCount = _defaultCount;
+
+  // Build count buttons HTML
+  var _countBtns = '';
+  for (var _oi=0; _oi<_opts.length; _oi++) {
+    var _n = _opts[_oi];
+    var _sel = (_n === _defaultCount);
+    _countBtns += '<button class="ptcb" type="button" onclick="selectQCount('+_n+')"'
+      + ' style="flex:1;padding:10px 4px;border-radius:10px;cursor:pointer;font-size:.85rem;font-weight:800;'
+      + (_sel ? 'border:2px solid var(--amber);background:rgba(245,158,11,.12);color:var(--amber);' : 'border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--muted2);')
+      + '">'+_n+'</button>';
+  }
+  // Always add 'All' button — selected if no intermediate options exist
+  var _allSel = (_defaultCount === qMax);
+  _countBtns += '<button class="ptcb" type="button" onclick="selectQCount('+qMax+')"'
+    + ' style="flex:1;padding:10px 4px;border-radius:10px;cursor:pointer;font-size:.78rem;font-weight:700;'
+    + (_allSel ? 'border:2px solid var(--amber);background:rgba(245,158,11,.12);color:var(--amber);' : 'border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--muted2);')
+    + '">All<br><span style="font-size:.62rem;">'+qMax+'</span></button>';
 
   overlay.innerHTML =
     '<div style="background:linear-gradient(145deg,#1a2d45,#0f1f35);border:2px solid rgba(14,165,233,.35);border-radius:20px;padding:26px 22px;max-width:360px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.6);">' +
       '<div style="text-align:center;margin-bottom:16px;">' +
-        '<div style="font-size:2.2rem;margin-bottom:6px;">🎯</div>' +
+        '<div style="font-size:2.2rem;margin-bottom:6px;">&#x1F3AF;</div>' +
         '<div style="font-size:1.05rem;font-weight:900;color:var(--text);margin-bottom:4px;">Ready to Test?</div>' +
-        '<div style="font-size:.8rem;font-weight:700;color:var(--muted2);">' + qMax + ' questions available · ' + bankCount + ' topic' + (bankCount!==1?'s':'') + '</div>' +
+        '<div style="font-size:.8rem;font-weight:700;color:var(--muted2);">' + qMax + ' questions available &middot; ' + bankCount + ' topic' + (bankCount!==1?'s':'') + '</div>' +
       '</div>' +
       '<div style="margin-bottom:14px;">' +
-        '<div style="font-size:.72rem;font-weight:900;color:var(--muted2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">⏱ Timer</div>' +
+        '<div style="font-size:.72rem;font-weight:900;color:var(--muted2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">&#x23F1; Timer</div>' +
         '<div style="display:flex;gap:8px;">' +
-          '<button id="pt-timed" type="button" onclick="selectTimerMode(true)" style="flex:1;padding:11px 8px;border-radius:11px;border:2px solid var(--teal);background:rgba(14,165,233,.15);color:var(--teal);font-size:.82rem;font-weight:800;cursor:pointer;">⏰ Timed<br><span style="font-size:.67rem;font-weight:600;opacity:.8;">30 sec/question</span></button>' +
-          '<button id="pt-untimed" type="button" onclick="selectTimerMode(false)" style="flex:1;padding:11px 8px;border-radius:11px;border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--muted2);font-size:.82rem;font-weight:800;cursor:pointer;">🐢 No Timer<br><span style="font-size:.67rem;font-weight:600;opacity:.8;">Take your time</span></button>' +
+          '<button id="pt-timed" type="button" onclick="selectTimerMode(true)" style="flex:1;padding:11px 8px;border-radius:11px;border:2px solid var(--teal);background:rgba(14,165,233,.15);color:var(--teal);font-size:.82rem;font-weight:800;cursor:pointer;">&#x23F0; Timed<br><span style="font-size:.67rem;font-weight:600;opacity:.8;">30 sec/question</span></button>' +
+          '<button id="pt-untimed" type="button" onclick="selectTimerMode(false)" style="flex:1;padding:11px 8px;border-radius:11px;border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--muted2);font-size:.82rem;font-weight:800;cursor:pointer;">&#x1F422; No Timer<br><span style="font-size:.67rem;font-weight:600;opacity:.8;">Take your time</span></button>' +
         '</div>' +
       '</div>' +
       '<div style="margin-bottom:16px;">' +
-        '<div style="font-size:.72rem;font-weight:900;color:var(--muted2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">📝 Questions</div>' +
-        '<div style="display:flex;gap:8px;">' +
-          '<button class="ptcb" type="button" onclick="selectQCount(10)" style="flex:1;padding:10px 4px;border-radius:10px;border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--muted2);font-size:.85rem;font-weight:800;cursor:pointer;">10</button>' +
-          '<button class="ptcb" type="button" onclick="selectQCount(' + c20 + ')" style="flex:1;padding:10px 4px;border-radius:10px;border:2px solid var(--amber);background:rgba(245,158,11,.12);color:var(--amber);font-size:.85rem;font-weight:800;cursor:pointer;">' + c20 + '</button>' +
-          '<button class="ptcb" type="button" onclick="selectQCount(' + c30 + ')" style="flex:1;padding:10px 4px;border-radius:10px;border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--muted2);font-size:.85rem;font-weight:800;cursor:pointer;">' + c30 + '</button>' +
-          '<button class="ptcb" type="button" onclick="selectQCount(' + qMax + ')" style="flex:1;padding:10px 4px;border-radius:10px;border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--muted2);font-size:.75rem;font-weight:700;cursor:pointer;">All<br><span style="font-size:.6rem;">' + qMax + '</span></button>' +
-        '</div>' +
+        '<div style="font-size:.72rem;font-weight:900;color:var(--muted2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">&#x1F4DD; Questions</div>' +
+        '<div style="display:flex;gap:8px;">' + _countBtns + '</div>' +
       '</div>' +
       '<div style="display:flex;gap:10px;">' +
         '<button type="button" onclick="closePretestModal()" style="flex:0 0 44px;padding:12px;border-radius:12px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:var(--muted2);font-size:.9rem;cursor:pointer;">✕</button>' +
