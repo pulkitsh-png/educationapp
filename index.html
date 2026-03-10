@@ -693,6 +693,10 @@ select option {
   color: #f0f6ff;
 }
 
+
+/* ── Question Image ── */
+#q-img-wrap { animation: fadeUp .3s ease; }
+#q-img { border-radius: 8px 8px 0 0; }
 </style>
 </head>
 <body>
@@ -868,6 +872,10 @@ select option {
       <div class="q-meta">
         <span class="q-skill-tag" id="q-skill"></span>
         <span id="q-diff-chip"></span>
+      </div>
+      <div id="q-img-wrap" style="display:none;margin:0 0 12px 0;border-radius:12px;overflow:hidden;border:1.5px solid rgba(14,165,233,.25);background:rgba(0,0,0,.2);">
+        <img id="q-img" src="" alt="Question diagram" style="width:100%;max-height:220px;object-fit:contain;display:block;padding:6px;" />
+        <div id="q-img-desc" style="font-size:.7rem;color:var(--muted2);font-weight:600;padding:4px 10px 8px;text-align:center;font-style:italic;"></div>
       </div>
       <div class="q-text" id="q-text"></div>
       <div class="opts" id="opts"></div>
@@ -1161,7 +1169,7 @@ function dbg(msg, data) {
     catch(e) { line += "\n  " + String(data).slice(0, 500); }
   }
   log.textContent = line + "\n\n" + log.textContent;
-  // DO NOT auto-show panel — only show if user explicitly toggled it open
+  // DO NOT auto-show panel - only show if user explicitly toggled it open
 }
 function toggleDebugPanel() {
   var p = document.getElementById("debug-panel");
@@ -1202,7 +1210,7 @@ function showSuccessModal(questionCount, bankCount, totalQ) {
   });
 }
 
-// Proxy URL — set in Settings if running from iPhone
+// Proxy URL - set in Settings if running from iPhone
 var PROXY_URL = "";
 
 // getApiUrl removed - using Gemini direct
@@ -1211,100 +1219,100 @@ var PROXY_URL = "";
 
 
 // ═══════════════════════════════════════════════
-//  QUESTION BANK — 38 hand-verified questions
+//  QUESTION BANK - 38 hand-verified questions
 //  Each has: difficulty easy|medium|hard + explanation + correct answer index
 // ═══════════════════════════════════════════════
 var BUILTIN = [
   { id:"b0", topic:"Unit Fractions", lesson:"10-1", icon:"🍕", njsla:"4.NF.B.4a", desc:"Fractions as multiples of unit fractions",
     questions:[
       { q:"2/4 = 2 × ☐. What goes in the box?", opts:["1/4","1/2","2/4","4/2"], ans:0, diff:"easy", skill:"4.NF.B.4a",
-        exp:"✅ Correct! 2/4 = 2 × 1/4. We need 2 copies of the unit fraction 1/4 to make 2/4." },
+        exp:"&#x2705; Correct! 2/4 = 2 × 1/4. We need 2 copies of the unit fraction 1/4 to make 2/4." },
       { q:"Which equation shows 5/8 as a multiple of a unit fraction?", opts:["5/8 = 5 × 1/8","5/8 = 8 × 1/5","5/8 = 5 + 8","5 × 8 = 40"], ans:0, diff:"easy", skill:"4.NF.B.4a",
-        exp:"✅ 5/8 = 5 × 1/8. The numerator (5) tells how many unit fractions (1/8) we have." },
+        exp:"&#x2705; 5/8 = 5 × 1/8. The numerator (5) tells how many unit fractions (1/8) we have." },
       { q:"2/6 = ☐ × 1/6. What number fills the box?", opts:["6","1","2","3"], ans:2, diff:"easy", skill:"4.NF.B.4a",
-        exp:"✅ 2/6 = 2 × 1/6. The numerator always tells us how many unit fractions!" },
+        exp:"&#x2705; 2/6 = 2 × 1/6. The numerator always tells us how many unit fractions!" },
       { q:"Which fraction equals 4 × 1/8?", opts:["1/2","4/8","4/4","8/4"], ans:1, diff:"medium", skill:"4.NF.B.4a",
-        exp:"✅ 4 × 1/8 = 4/8. Multiply the whole number by the numerator, keep the denominator." },
+        exp:"&#x2705; 4 × 1/8 = 4/8. Multiply the whole number by the numerator, keep the denominator." },
       { q:"5/2 = ☐ × 1/2. What is the missing number?", opts:["2","5","1","10"], ans:1, diff:"medium", skill:"4.NF.B.4a",
-        exp:"✅ 5/2 = 5 × 1/2. We need 5 halves to make five-halves." },
+        exp:"&#x2705; 5/2 = 5 × 1/2. We need 5 halves to make five-halves." },
       { q:"Write 9/5 as a multiple of a unit fraction. What is the unit fraction?", opts:["1/9","1/5","5/9","9/1"], ans:1, diff:"medium", skill:"4.NF.B.4a",
-        exp:"✅ 9/5 = 9 × 1/5. A unit fraction always has 1 as its numerator." },
+        exp:"&#x2705; 9/5 = 9 × 1/5. A unit fraction always has 1 as its numerator." },
       { q:"8/3 = ☐ × 1/3. What is the missing number?", opts:["3","1","8","24"], ans:2, diff:"medium", skill:"4.NF.B.4a",
-        exp:"✅ 8/3 = 8 × 1/3. We need 8 groups of one-third." },
+        exp:"&#x2705; 8/3 = 8 × 1/3. We need 8 groups of one-third." },
       { q:"A number line shows 4 equal jumps of 1/8 each from 0. Which equation matches?", opts:["4/8 = 4 × 1/8","4/8 = 8 × 1/4","4 × 8 = 32","1/8 + 4 = 4 1/8"], ans:0, diff:"hard", skill:"4.NF.B.4a",
-        exp:"✅ 4 jumps of 1/8 = 4 × 1/8 = 4/8. Number of jumps × size of each jump = total." },
-      { q:"Maya says 6/4 = 6 × 1/4. Tom says it equals 4 × 1/6. Who is correct and why?", opts:["Maya — the numerator tells us how many unit fractions","Tom — the denominator is the multiplier","Both are wrong — it equals 6 × 4","Neither — 6/4 cannot be written as a multiplication"], ans:0, diff:"hard", skill:"4.NF.B.4a",
-        exp:"✅ Maya is right! 6/4 = 6 × 1/4. The numerator (6) = number of unit fractions, denominator (4) = the unit fraction." },
+        exp:"&#x2705; 4 jumps of 1/8 = 4 × 1/8 = 4/8. Number of jumps × size of each jump = total." },
+      { q:"Maya says 6/4 = 6 × 1/4. Tom says it equals 4 × 1/6. Who is correct and why?", opts:["Maya - the numerator tells us how many unit fractions","Tom - the denominator is the multiplier","Both are wrong - it equals 6 × 4","Neither - 6/4 cannot be written as a multiplication"], ans:0, diff:"hard", skill:"4.NF.B.4a",
+        exp:"&#x2705; Maya is right! 6/4 = 6 × 1/4. The numerator (6) = number of unit fractions, denominator (4) = the unit fraction." },
       { q:"If n × 1/8 = 12/8, what is n, and what mixed number equals 12/8?", opts:["n = 12, equals 1 4/8","n = 8, equals 1 1/2","n = 12, equals 2 1/4","n = 4, equals 3/2"], ans:0, diff:"hard", skill:"4.NF.B.4a",
-        exp:"✅ n = 12 because 12 × 1/8 = 12/8. And 12/8 = 8/8 + 4/8 = 1 + 4/8 = 1 4/8." },
+        exp:"&#x2705; n = 12 because 12 × 1/8 = 12/8. And 12/8 = 8/8 + 4/8 = 1 + 4/8 = 1 4/8." },
     ]
   },
   { id:"b1", topic:"Fractions × Whole (Models)", lesson:"10-2", icon:"📏", njsla:"4.NF.B.4b", desc:"Multiply fractions by whole numbers using models",
     questions:[
       { q:"Penny rides her bicycle 1/4 mile each day for 5 days. How far does she ride in total?", opts:["5/4 miles","1/5 miles","4/5 miles","20 miles"], ans:0, diff:"easy", skill:"4.NF.B.4b",
-        exp:"✅ 5 × 1/4 = 5/4 miles = 1 1/4 miles. Think of 5 groups of 1/4." },
+        exp:"&#x2705; 5 × 1/4 = 5/4 miles = 1 1/4 miles. Think of 5 groups of 1/4." },
       { q:"Georgie walked 2/3 mile to the gym and 2/3 mile back home. How far did Georgie walk in total?", opts:["4/3 miles","2/3 miles","2/6 miles","6/3 miles"], ans:0, diff:"easy", skill:"4.NF.B.4b",
-        exp:"✅ 2 × 2/3 = 4/3 = 1 1/3 miles. Two equal trips of 2/3 each." },
+        exp:"&#x2705; 2 × 2/3 = 4/3 = 1 1/3 miles. Two equal trips of 2/3 each." },
       { q:"Ronald rode a rollercoaster 3 times. The track is 1/4 mile long. How far did he ride total?", opts:["3/4 mile","3 miles","1/12 mile","4/3 miles"], ans:0, diff:"easy", skill:"4.NF.B.4b",
-        exp:"✅ 3 × 1/4 = 3/4 mile. Three rides of 1/4 mile each." },
+        exp:"&#x2705; 3 × 1/4 = 3/4 mile. Three rides of 1/4 mile each." },
       { q:"Audrey uses 5/8 cup of fruit in each smoothie. She makes 6 smoothies. How many cups does she use?", opts:["30/8 cups","6/8 cups","11/8 cups","5/48 cups"], ans:0, diff:"medium", skill:"4.NF.B.4b",
-        exp:"✅ 6 × 5/8 = 30/8 = 3 6/8 = 3 3/4 cups. Multiply whole number × numerator, keep denominator." },
+        exp:"&#x2705; 6 × 5/8 = 30/8 = 3 6/8 = 3 3/4 cups. Multiply whole number × numerator, keep denominator." },
       { q:"Benjamin rides his scooter 3/5 mile per day for 4 days. How far does he ride total?", opts:["12/5 miles","3/20 miles","7/5 miles","4/3 miles"], ans:0, diff:"medium", skill:"4.NF.B.4b",
-        exp:"✅ 4 × 3/5 = 12/5 = 2 2/5 miles. 4 × 3 = 12, keep denominator 5." },
+        exp:"&#x2705; 4 × 3/5 = 12/5 = 2 2/5 miles. 4 × 3 = 12, keep denominator 5." },
       { q:"Kurt swam 4/8 mile across the lake and 4/8 mile back. What is his total swimming distance?", opts:["8/8 mile (= 1 whole mile)","4/8 mile","16/8 miles","2/8 mile"], ans:0, diff:"medium", skill:"4.NF.B.4b",
-        exp:"✅ 2 × 4/8 = 8/8 = 1 mile. He swam the same distance twice!" },
+        exp:"&#x2705; 2 × 4/8 = 8/8 = 1 mile. He swam the same distance twice!" },
       { q:"Gabe uses 2/3 yard of fabric for each cape. He makes 5 capes. How much fabric does he need?", opts:["10/3 yards","7/3 yards","2/15 yards","15/2 yards"], ans:0, diff:"medium", skill:"4.NF.B.4b",
-        exp:"✅ 5 × 2/3 = 10/3 = 3 1/3 yards." },
+        exp:"&#x2705; 5 × 2/3 = 10/3 = 3 1/3 yards." },
       { q:"Maria swims 3/5 mile each way to the dock and back, 3 times a week. What is her weekly total?", opts:["18/5 miles","6/5 miles","9/5 miles","3/5 miles"], ans:0, diff:"hard", skill:"4.NF.B.4b",
-        exp:"✅ Each round trip: 2 × 3/5 = 6/5. For 3 days: 3 × 6/5 = 18/5 = 3 3/5 miles." },
+        exp:"&#x2705; Each round trip: 2 × 3/5 = 6/5. For 3 days: 3 × 6/5 = 18/5 = 3 3/5 miles." },
       { q:"A recipe uses 3/4 cup of sugar per batch. How many cups are needed for 8 batches?", opts:["6 cups","3 cups","24 cups","8 3/4 cups"], ans:0, diff:"hard", skill:"4.NF.B.4b",
-        exp:"✅ 8 × 3/4 = 24/4 = 6 cups. Multiply whole number × numerator then simplify." },
+        exp:"&#x2705; 8 × 3/4 = 24/4 = 6 cups. Multiply whole number × numerator then simplify." },
       { q:"Jenna jogs 5/6 mile on Monday, Wednesday, and Friday. She jogs 3/4 mile on Tuesday and Thursday. Which weekly total is larger?", opts:["Mon/Wed/Fri: 3 × 5/6 = 2 1/2 miles (larger)","Tue/Thu: 2 × 3/4 = 1 1/2 miles (larger)","They are equal","Cannot be determined without more info"], ans:0, diff:"hard", skill:"4.NF.B.4b",
-        exp:"✅ MWF: 3 × 5/6 = 15/6 = 2 1/2 miles. TuTh: 2 × 3/4 = 6/4 = 1 1/2 miles. Monday/Wednesday/Friday is larger." },
+        exp:"&#x2705; MWF: 3 × 5/6 = 15/6 = 2 1/2 miles. TuTh: 2 × 3/4 = 6/4 = 1 1/2 miles. Monday/Wednesday/Friday is larger." },
     ]
   },
   { id:"b2", topic:"Multiply Fractions (Symbols)", lesson:"10-3", icon:"✖️", njsla:"4.NF.B.4c", desc:"Multiply fractions by whole numbers using equations",
     questions:[
       { q:"9 × 1/4 = ?", opts:["9/4","1/36","10/4","9/1"], ans:0, diff:"easy", skill:"4.NF.B.4c",
-        exp:"✅ 9 × 1/4 = 9/4 = 2 1/4. Multiply the whole number by the numerator, keep the denominator." },
+        exp:"&#x2705; 9 × 1/4 = 9/4 = 2 1/4. Multiply the whole number by the numerator, keep the denominator." },
       { q:"5 × 3/5 = ?", opts:["15/5 (= 3)","8/5","5/15","25/5"], ans:0, diff:"easy", skill:"4.NF.B.4c",
-        exp:"✅ 5 × 3/5 = 15/5 = 3. When the answer equals a whole number, that's great!" },
+        exp:"&#x2705; 5 × 3/5 = 15/5 = 3. When the answer equals a whole number, that's great!" },
       { q:"7 × 1/3 = ?", opts:["7/3","8/3","1/21","7/21"], ans:0, diff:"easy", skill:"4.NF.B.4c",
-        exp:"✅ 7 × 1/3 = 7/3 = 2 1/3. Multiply 7 × 1 = 7, keep denominator 3." },
+        exp:"&#x2705; 7 × 1/3 = 7/3 = 2 1/3. Multiply 7 × 1 = 7, keep denominator 3." },
       { q:"8 × 5/12 = ?", opts:["40/12","13/12","8/60","5/96"], ans:0, diff:"medium", skill:"4.NF.B.4c",
-        exp:"✅ 8 × 5/12 = 40/12 = 3 4/12 = 3 1/3. Always multiply 8 × 5 = 40 first." },
+        exp:"&#x2705; 8 × 5/12 = 40/12 = 3 4/12 = 3 1/3. Always multiply 8 × 5 = 40 first." },
       { q:"9 × 3/10 = ?", opts:["27/10","12/10","9/30","90/3"], ans:0, diff:"medium", skill:"4.NF.B.4c",
-        exp:"✅ 9 × 3/10 = 27/10 = 2 7/10. 9 × 3 = 27, keep denominator 10." },
+        exp:"&#x2705; 9 × 3/10 = 27/10 = 2 7/10. 9 × 3 = 27, keep denominator 10." },
       { q:"4 × 2/3 = ?", opts:["8/3","6/3","2/12","4/2"], ans:0, diff:"medium", skill:"4.NF.B.4c",
-        exp:"✅ 4 × 2/3 = 8/3 = 2 2/3. 4 × 2 = 8, keep denominator 3." },
+        exp:"&#x2705; 4 × 2/3 = 8/3 = 2 2/3. 4 × 2 = 8, keep denominator 3." },
       { q:"Kris walks 7/8 mile each day for 8 days. How far does she walk in total?", opts:["7 miles (exactly!)","15/8 miles","56 miles","7/64 miles"], ans:0, diff:"medium", skill:"4.NF.B.4c",
-        exp:"✅ 8 × 7/8 = 56/8 = 7 miles exactly! When you multiply by the denominator, you get a whole number." },
+        exp:"&#x2705; 8 × 7/8 = 56/8 = 7 miles exactly! When you multiply by the denominator, you get a whole number." },
       { q:"Jake walks 3/10 mile each day for 8 days. Express the total as a mixed number.", opts:["2 4/10 miles","24 miles","11/10 miles","3/80 miles"], ans:0, diff:"hard", skill:"4.NF.B.4c",
-        exp:"✅ 8 × 3/10 = 24/10 = 2 4/10 = 2 2/5 miles. Divide 24 ÷ 10 = 2 remainder 4." },
+        exp:"&#x2705; 8 × 3/10 = 24/10 = 2 4/10 = 2 2/5 miles. Divide 24 ÷ 10 = 2 remainder 4." },
       { q:"Corinne has cheer practice 5/6 hour each day, Monday through Friday (5 days). What is the total practice time?", opts:["25/6 hours (= 4 1/6 hrs)","10/6 hours","5/30 hours","30/5 hours"], ans:0, diff:"hard", skill:"4.NF.B.4c",
-        exp:"✅ 5 × 5/6 = 25/6 = 4 1/6 hours. 5 days × 5/6 per day = 25/6." },
+        exp:"&#x2705; 5 × 5/6 = 25/6 = 4 1/6 hours. 5 days × 5/6 per day = 25/6." },
       { q:"Olivia does 20 math problems. She uses 3/4 sheet of paper per problem. How many whole sheets does she need?", opts:["15 sheets","60 sheets","20 sheets","14 sheets"], ans:0, diff:"hard", skill:"4.NF.B.4c",
-        exp:"✅ 20 × 3/4 = 60/4 = 15 sheets. 60 ÷ 4 = 15 exactly." },
+        exp:"&#x2705; 20 × 3/4 = 60/4 = 15 sheets. 60 ÷ 4 = 15 exactly." },
     ]
   },
   { id:"b3", topic:"Solve Time Problems", lesson:"10-4", icon:"⏱️", njsla:"4.MD.A.2", desc:"Add, subtract, multiply and divide with time",
     questions:[
       { q:"8 hours 12 minutes + 3 hours 15 minutes = ?", opts:["11 hours 27 minutes","11 hours 17 minutes","12 hours 27 minutes","10 hours 57 minutes"], ans:0, diff:"easy", skill:"4.MD.A.2",
-        exp:"✅ 8h + 3h = 11h. 12min + 15min = 27min. Total: 11 hours 27 minutes." },
+        exp:"&#x2705; 8h + 3h = 11h. 12min + 15min = 27min. Total: 11 hours 27 minutes." },
       { q:"What is 112 weeks ÷ 7?", opts:["16 weeks","14 weeks","18 weeks","56 weeks"], ans:0, diff:"easy", skill:"4.MD.A.1",
-        exp:"✅ 112 ÷ 7 = 16 weeks. You can check: 7 × 16 = 112 ✓" },
+        exp:"&#x2705; 112 ÷ 7 = 16 weeks. You can check: 7 × 16 = 112 ✓" },
       { q:"What is 8 × 3/4 of an hour? Express in whole hours.", opts:["6 hours","24 hours","3 hours","5 hours"], ans:0, diff:"easy", skill:"4.MD.A.2",
-        exp:"✅ 8 × 3/4 = 24/4 = 6 hours. Eight groups of three-quarter hours = 6 full hours." },
+        exp:"&#x2705; 8 × 3/4 = 24/4 = 6 hours. Eight groups of three-quarter hours = 6 full hours." },
       { q:"Ann worked 5 years 7 months at job 1 and 3 years 3 months at job 2. How long did she work total?", opts:["8 years 10 months","9 years 0 months","7 years 4 months","8 years 4 months"], ans:0, diff:"medium", skill:"4.MD.A.2",
-        exp:"✅ Years: 5+3=8. Months: 7+3=10. Total: 8 years 10 months." },
+        exp:"&#x2705; Years: 5+3=8. Months: 7+3=10. Total: 8 years 10 months." },
       { q:"9 weeks 5 days − 1 week 6 days = ?", opts:["7 weeks 6 days","8 weeks 1 day","7 weeks 1 day","8 weeks 6 days"], ans:0, diff:"medium", skill:"4.MD.A.2",
-        exp:"✅ Borrow 1 week (7 days): 8 weeks 12 days − 1 week 6 days = 7 weeks 6 days." },
+        exp:"&#x2705; Borrow 1 week (7 days): 8 weeks 12 days − 1 week 6 days = 7 weeks 6 days." },
       { q:"Ann works 2,250 minutes over 5 days. How many minutes does she work each day?", opts:["450 minutes","250 minutes","500 minutes","225 minutes"], ans:0, diff:"medium", skill:"4.MD.A.1",
-        exp:"✅ 2,250 ÷ 5 = 450 minutes per day. Check: 450 × 5 = 2,250 ✓" },
+        exp:"&#x2705; 2,250 ÷ 5 = 450 minutes per day. Check: 450 × 5 = 2,250 ✓" },
       { q:"Ann worked 3 times longer at job 4 than job 3. She worked 11/12 year at job 3. How long at job 4?", opts:["33/12 years (= 2¾ years)","14/12 years","11/36 years","3/11 years"], ans:0, diff:"hard", skill:"4.MD.A.2",
-        exp:"✅ 3 × 11/12 = 33/12 = 2 9/12 = 2¾ years. Multiply the time by 3." },
+        exp:"&#x2705; 3 × 11/12 = 33/12 = 2 9/12 = 2¾ years. Multiply the time by 3." },
       { q:"Beth's day: works 8½ hrs, drives 1¼ hrs, cooks ¾ hr, sleeps 7½ hrs. How many free hours does she have in a 24-hour day?", opts:["6 hours","5 hours","7 hours","4 hours"], ans:0, diff:"hard", skill:"4.MD.A.2",
-        exp:"✅ Total used: 8.5+1.25+0.75+7.5 = 18 hours. Free time: 24−18 = 6 hours." },
+        exp:"&#x2705; Total used: 8.5+1.25+0.75+7.5 = 18 hours. Free time: 24−18 = 6 hours." },
     ]
   }
 ];
@@ -1320,7 +1328,7 @@ var BADGES = [
   { id:"stars_10",     ico:"⭐", name:"Star Collector",   desc:"Earn 10 total stars",                    check: function(p){return p.totalStars>=10;} },
   { id:"stars_50",     ico:"🌟", name:"Star Champion",    desc:"Earn 50 total stars",                    check: function(p){return p.totalStars>=50;} },
   { id:"stars_100",    ico:"💫", name:"Star Legend",      desc:"Earn 100 total stars",                   check: function(p){return p.totalStars>=100;} },
-  { id:"correct_25",   ico:"✅", name:"Math Warrior",     desc:"Answer 25 questions correctly",          check: function(p){return p.lifetimeCorrect>=25;} },
+  { id:"correct_25",   ico:"&#x2705;", name:"Math Warrior",     desc:"Answer 25 questions correctly",          check: function(p){return p.lifetimeCorrect>=25;} },
   { id:"correct_100",  ico:"🏆", name:"Math Master",      desc:"Answer 100 questions correctly",         check: function(p){return p.lifetimeCorrect>=100;} },
   { id:"perfect",      ico:"💎", name:"Perfect Score!",   desc:"100% accuracy on any quiz",              check: function(p){return p.hasPerfect;} },
   { id:"level_3",      ico:"🎓", name:"Proficient",       desc:"Reach NJSLA Level 3 (score ≥ 725)",     check: function(p){return (p.bestNJScore||0)>=725;} },
@@ -1350,15 +1358,15 @@ function calcNJScore(questionsAnswered, answersArr) {
   var score = Math.round(Math.max(650, Math.min(850, raw)));
   var pct = (score - 650) / 200;
   var level, label, cls;
-  if (score < 695)      { level=1; label="Level 1 — Did Not Yet Meet"; cls="pl1"; }
-  else if (score < 725) { level=2; label="Level 2 — Partially Met";    cls="pl2"; }
-  else if (score < 770) { level=3; label="Level 3 — Met Expectations ✅"; cls="pl3"; }
-  else                  { level=4; label="Level 4 — Exceeded! 🌟";     cls="pl4"; }
+  if (score < 695)      { level=1; label="Level 1 - Did Not Yet Meet"; cls="pl1"; }
+  else if (score < 725) { level=2; label="Level 2 - Partially Met";    cls="pl2"; }
+  else if (score < 770) { level=3; label="Level 3 - Met Expectations &#x2705;"; cls="pl3"; }
+  else                  { level=4; label="Level 4 - Exceeded! 🌟";     cls="pl4"; }
   return { score:score, level:level, label:label, cls:cls, pct:pct };
 }
 
 // ═══════════════════════════════════════════════
-//  APP STATE — persisted to localStorage
+//  APP STATE - persisted to localStorage
 // ═══════════════════════════════════════════════
 var STORE_KEY = 'ivaan_v3';
 function loadProgress() {
@@ -1368,8 +1376,12 @@ function saveProgress() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(P)); } catch(e) {}
 }
 var BANKS_KEY = 'ivaan_banks_v3';
+var BANK_IMG_PREFIX = 'ivaan_bimg_';
 function loadBanks() { try { return JSON.parse(localStorage.getItem(BANKS_KEY)) || []; } catch(e) { return []; } }
 function saveBanks() { try { localStorage.setItem(BANKS_KEY, JSON.stringify(BANKS)); } catch(e) {} }
+function saveBankImage(id,b64){if(!b64)return;try{localStorage.setItem(BANK_IMG_PREFIX+id,b64);}catch(e){dbg('img quota',e.message);}}
+function loadBankImage(id){try{return localStorage.getItem(BANK_IMG_PREFIX+id)||null;}catch(e){return null;}}
+function deleteBankImage(id){try{localStorage.removeItem(BANK_IMG_PREFIX+id);}catch(e){}}
 var FLAGS_KEY = 'ivaan_flags_v3';
 function loadFlags() { try { return JSON.parse(localStorage.getItem(FLAGS_KEY)) || []; } catch(e) { return []; } }
 function saveFlags() { try { localStorage.setItem(FLAGS_KEY, JSON.stringify(FLAGS)); } catch(e) {} }
@@ -1387,6 +1399,11 @@ var FLAGS = loadFlags();
 var QS = {};
 
 function resetQS() {
+  // Always clear any running timer before resetting
+  if (QS && QS.timerInterval) clearInterval(QS.timerInterval);
+  // Restore timer box visibility for next quiz
+  var tb = document.getElementById('timer-box');
+  if (tb) tb.style.display = '';
   QS = {
     questions:[], current:0, correct:0, wrong:0, stars:0,
     streak:0, bestStreak:0, mode:'topic', topicName:'',
@@ -1473,7 +1490,7 @@ function setupIOSTouchFix() {
 }
 
 // ═══════════════════════════════════════════════
-//  NAVIGATION — see go() defined later (mobile-aware)
+//  NAVIGATION - see go() defined later (mobile-aware)
 // ═══════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════
@@ -1514,7 +1531,7 @@ function refreshDashboard() {
     if (plBadge) { plBadge.textContent = label; plBadge.className = 'pl-badge ' + cls; }
   }
 
-  // Recent badges — last 8 earned
+  // Recent badges - last 8 earned
   var earned = P.badges || [];
   var toShow = BADGES.filter(function(b){return earned.indexOf(b.id)!==-1;}).slice(-8);
   var emptySlots = Math.max(0, 4 - toShow.length);
@@ -1526,10 +1543,10 @@ function refreshDashboard() {
 }
 
 function njLevel(score) {
-  if (score < 695) return { label:'Level 1 — Not Yet Met', cls:'pl1' };
-  if (score < 725) return { label:'Level 2 — Partially Met', cls:'pl2' };
-  if (score < 770) return { label:'Level 3 — Met Expectations ✅', cls:'pl3' };
-  return { label:'Level 4 — Exceeded! 🌟', cls:'pl4' };
+  if (score < 695) return { label:'Level 1 - Not Yet Met', cls:'pl1' };
+  if (score < 725) return { label:'Level 2 - Partially Met', cls:'pl2' };
+  if (score < 770) return { label:'Level 3 - Met Expectations &#x2705;', cls:'pl3' };
+  return { label:'Level 4 - Exceeded! 🌟', cls:'pl4' };
 }
 
 // ═══════════════════════════════════════════════
@@ -1702,6 +1719,18 @@ function renderQ() {
   document.getElementById('q-diff-chip').innerHTML = q.diff
     ? '<span class="dc '+(diffChipCls[q.diff]||'dc-m')+'">'+(q.diff||'')+'</span>' : '';
 
+  // Show page image if this question references a visual
+  var qImgWrap = document.getElementById('q-img-wrap');
+  var qImgEl = document.getElementById('q-img');
+  var qImgDesc = document.getElementById('q-img-desc');
+  if (q.img && qImgWrap && qImgEl) {
+    qImgEl.src = 'data:image/jpeg;base64,' + q.img;
+    if (qImgDesc) qImgDesc.textContent = q.imgDesc ? '📐 ' + q.imgDesc : '';
+    qImgWrap.style.display = 'block';
+  } else if (qImgWrap) {
+    qImgWrap.style.display = 'none';
+    if (qImgEl) qImgEl.src = '';
+  }
   document.getElementById('q-text').textContent = q.q;
 
   // Options
@@ -1754,6 +1783,8 @@ function startTimer() {
   }, 1000);
 }
 function updateTimerUI() {
+  // Never update UI if untimed mode — timer is hidden and should stay hidden
+  if (QS.timed === false) return;
   var t = QS.timeLeft;
   var timerNumEl = document.getElementById('timer-num');
   if (timerNumEl) timerNumEl.textContent = t;
@@ -1767,6 +1798,8 @@ function updateTimerUI() {
   }
 }
 function timeUp() {
+  // Should never fire in untimed mode, but guard just in case
+  if (QS.timed === false) return;
   QS.answered = true;
   var q = QS.questions[QS.current];
   markOpts(q.ans, -1);
@@ -1821,7 +1854,7 @@ function markOpts(correctIdx, chosenIdx) {
 
 function showFeedback(type, msg) {
   var fb = document.getElementById('feedback');
-  var icons = { ok:'✅', ng:'💡', to:'⏰' };
+  var icons = { ok:'&#x2705;', ng:'💡', to:'⏰' };
   document.getElementById('feed-ico').textContent = icons[type] || '💡';
   document.getElementById('feed-txt').textContent = msg;
   fb.className = 'feedback on ' + type;
@@ -1843,11 +1876,11 @@ function adaptEngine() {
   var prev = QS.diffLevel;
   var msg = '';
 
-  if      (QS.consCorrect >= 4 && QS.diffLevel !== 'hard')   { QS.diffLevel = 'hard';   msg = '🚀 Outstanding! Switching to HARD — Expert Mode!'; }
+  if      (QS.consCorrect >= 4 && QS.diffLevel !== 'hard')   { QS.diffLevel = 'hard';   msg = '🚀 Outstanding! Switching to HARD - Expert Mode!'; }
   else if (QS.consCorrect >= 2 && QS.diffLevel === 'medium')  { QS.diffLevel = 'hard';   msg = '🔥 Great work! Moving up to Hard questions!'; }
   else if (QS.consCorrect >= 2 && QS.diffLevel === 'easy')    { QS.diffLevel = 'medium'; msg = '⬆️ Nice! Moving up to Medium questions!'; }
   else if (QS.consWrong   >= 2 && QS.diffLevel === 'hard')    { QS.diffLevel = 'medium'; msg = '📚 Let\'s do some Medium questions to build confidence!'; }
-  else if (QS.consWrong   >= 2 && QS.diffLevel === 'medium')  { QS.diffLevel = 'easy';   msg = '💪 Easier questions next — you\'ve got this!'; }
+  else if (QS.consWrong   >= 2 && QS.diffLevel === 'medium')  { QS.diffLevel = 'easy';   msg = '💪 Easier questions next - you\'ve got this!'; }
 
   if (msg && QS.diffLevel !== prev) {
     var msgTxt = document.getElementById('adapt-msg-txt');
@@ -1972,7 +2005,7 @@ function showResult() {
 
   // Score animation
   var sn = document.getElementById('r-score-num');
-  if (sn) { sn.textContent = '—'; setTimeout(function(){sn.textContent=score;}, 350); }
+  if (sn) { sn.textContent = '-'; setTimeout(function(){sn.textContent=score;}, 350); }
 
   var barPct = Math.min(100, Math.max(0, pct * 100));
   setTimeout(function() {
@@ -2187,7 +2220,7 @@ function processFile(file) {
     var gb = document.getElementById('gen-btn');
     if (gb) { gb.disabled = false; gb.style.opacity = '1'; gb.style.transform = 'scale(1)'; }
     var hint = document.getElementById('gen-btn-hint');
-    if (hint) hint.textContent = '✅ Photo ready — tap Generate now!';
+    if (hint) hint.textContent = '&#x2705; Photo ready - tap Generate now!';
 function resetUploadForNext() {
   // Reset all file inputs
   var ids = ['fileInput','fileInputCamera','fileInputLibrary'];
@@ -2236,13 +2269,13 @@ function resetUploadForNext() {
     if (wm) wm.style.display = 'none';
     if (rm) rm.style.display = 'block';
     var wh = document.getElementById('wiz-hint');
-    if (wh) wh.textContent = '✅ Photo loaded! Now tap "Generate Questions with AI" ↓';
+    if (wh) wh.textContent = '&#x2705; Photo loaded! Now tap "Generate Questions with AI" ↓';
     if (wh) wh.style.color = 'var(--green)';
     // Highlight step 2
     var s2 = document.getElementById('wiz-step2');
     if (s2) { s2.style.background = 'rgba(245,158,11,.2)'; s2.style.border = '2px solid var(--amber)'; s2.querySelector('div:nth-child(2)').style.color = 'var(--amber)'; }
     var pc = document.getElementById('photo-count');
-    if (pc) pc.textContent = '✅ 1 photo ready — converted to JPEG';
+    if (pc) pc.textContent = '&#x2705; 1 photo ready - converted to JPEG';
     // Clear old success/error
     var gp = document.getElementById('gen-preview');
     if (gp) gp.style.display = 'none';
@@ -2304,7 +2337,68 @@ function generateQs() {
     + "Look at this textbook image and create exactly " + numQ + " multiple choice questions. "
     + 'Reply with ONLY a raw JSON object. No markdown, no code fences, no preamble. '
     + 'CRITICAL: Use ONLY plain ASCII straight quotes and characters in all text. NO smart quotes, NO curly quotes, NO em-dashes, NO special Unicode. '
-    + 'Format: {"topic":"Topic Name","lesson":"10-1","questions":[{"q":"question text","opts":["A text","B text","C text","D text"],"ans":0,"diff":"easy","skill":"4.NF.B.4a","exp":"explanation"}]}';
+    + 'For questions that reference a visual (diagram, number line, fraction model, array, figure): set "needsImg":true AND describe what the visual shows in the "imgDesc" field (e.g. "A number line from 0 to 1 divided into 4 equal parts with an arrow pointing to 3/4"). For questions that are fully text-based, set "needsImg":false and leave imgDesc empty. '
+    + 'CRITICAL: Use ONLY plain ASCII straight quotes. NO smart quotes, NO em-dashes, NO special Unicode. '
+    + 'Format: {"topic":"Topic Name","lesson":"10-1","questions":[{"q":"question text","opts":["A","B","C","D"],"ans":0,"diff":"easy","skill":"4.NF.B.4a","exp":"explanation","needsImg":false,"imgDesc":""}]}';
+  // Build a compressed page thumbnail to attach to image-dependent questions
+  // We do this async via createImageBitmap before building the API request
+  var _pageThumb = null; // will be set before validation runs
+  // Use a simple inline compression: decode b64 → blob → bitmap → canvas → re-encode
+  function _buildThumbAndGenerate() {
+    var b64 = _uploadB64;
+    var mime = sanitizeMime(_uploadMime);
+    try {
+      var byteStr = atob(b64);
+      var arr = new Uint8Array(byteStr.length);
+      for (var _bi=0; _bi<byteStr.length; _bi++) arr[_bi] = byteStr.charCodeAt(_bi);
+      var blob = new Blob([arr], {type: mime});
+      createImageBitmap(blob).then(function(bitmap) {
+        var maxW = 480;
+        var scale = Math.min(maxW / bitmap.width, 1);
+        var tw = Math.round(bitmap.width * scale);
+        var th = Math.round(bitmap.height * scale);
+        var tc = document.createElement("canvas");
+        tc.width = tw; tc.height = th;
+        tc.getContext("2d").drawImage(bitmap, 0, 0, tw, th);
+        // Try progressively lower quality until under 80KB
+        var q = 0.65;
+        var result;
+        do {
+          result = tc.toDataURL("image/jpeg", q).split(",")[1];
+          q -= 0.1;
+        } while (result && result.length * 0.75 > 80000 && q > 0.15);
+        _pageThumb = result;
+        dbg("Page thumb OK, size KB", Math.round((_pageThumb||"").length * 0.75 / 1024));
+        _doApiCall();
+      }).catch(function(_e) {
+        dbg("createImageBitmap failed, using raw b64", _e.message);
+        _pageThumb = b64; // fallback: store original (may be large)
+        _doApiCall();
+      });
+    } catch(_e2) {
+      dbg("Thumb setup error", _e2.message);
+      _pageThumb = null;
+      _doApiCall();
+    }
+  }
+  _buildThumbAndGenerate();
+  return; // _doApiCall() continues the flow
+}
+
+function _doApiCall() {
+  var apiKey = P.apiKey || "";
+  var loader = document.getElementById("loader");
+  var genBtn = document.getElementById("gen-btn");
+  function doneLoading() { if (loader) loader.classList.remove("on"); if (genBtn) genBtn.disabled = false; }
+  var grade = "4"; var numQ = "10";
+  var gradeEl = document.getElementById("g-grade"); var numEl = document.getElementById("g-num");
+  if (gradeEl) grade = gradeEl.value; if (numEl) numQ = numEl.value;
+  var promptText = "You are a Grade " + grade + " NJ math teacher creating NJSLA/NJMAP quiz questions. "
+    + "Look at this textbook image and create exactly " + numQ + " multiple choice questions. "
+    + 'Reply with ONLY a raw JSON object. No markdown, no code fences, no preamble. '
+    + 'For questions that reference a visual (diagram, number line, fraction model, array, figure): set "needsImg":true AND describe what the visual shows in the "imgDesc" field (e.g. "A number line from 0 to 1 divided into 4 equal parts with an arrow pointing to 3/4"). For questions that are fully text-based, set "needsImg":false and leave imgDesc empty. '
+    + 'CRITICAL: Use ONLY plain ASCII straight quotes. NO smart quotes, NO em-dashes, NO special Unicode. '
+    + 'Format: {"topic":"Topic Name","lesson":"10-1","questions":[{"q":"question text","opts":["A","B","C","D"],"ans":0,"diff":"easy","skill":"4.NF.B.4a","exp":"explanation","needsImg":false,"imgDesc":""}]}';
   var contentArr = [];
   contentArr.push({ type:"text", text: promptText });
   if (_multiFiles && _multiFiles.length > 1) {
@@ -2355,14 +2449,38 @@ function generateQs() {
     try { bank = JSON.parse(raw); } catch(pe) { doneLoading(); showGenError("JSON parse error: " + pe.message + " | " + raw.slice(0,200)); return; }
     if (!bank.questions || !bank.questions.length) { doneLoading(); showGenError("No questions found in AI response"); return; }
     var valid = [];
+    var withImg = 0;
+    // Also detect image-needs by keywords as fallback if AI didn't set needsImg
+    var imageKeywords = ['the figure', 'the picture', 'the diagram', 'the model', 'the shape shown',
+      'shown above', 'shown below', 'look at the', 'the graph', 'the chart',
+      'the number line', 'the array shown', 'in the figure', 'the illustration'];
     for (var vi=0; vi<bank.questions.length; vi++) {
       var q = bank.questions[vi];
-      if (q && q.q && Array.isArray(q.opts) && q.opts.length===4 && typeof q.ans==="number") valid.push(q);
+      if (!q || !q.q || !Array.isArray(q.opts) || q.opts.length!==4 || typeof q.ans!=="number") continue;
+      // Determine if question needs the page image
+      var needsImg = (q.needsImg === true);
+      if (!needsImg) {
+        var qLower = q.q.toLowerCase();
+        for (var ki=0; ki<imageKeywords.length; ki++) {
+          if (qLower.indexOf(imageKeywords[ki]) !== -1) { needsImg = true; break; }
+        }
+      }
+      // Attach the page thumbnail to image-dependent questions
+      if (needsImg && _pageThumb) {
+        q.img = _pageThumb;
+        q.imgDesc = q.imgDesc || '';
+        withImg++;
+        dbg('Attached image to question', q.q.slice(0,50));
+      }
+      valid.push(q);
     }
-    if (!valid.length) { doneLoading(); showGenError("All questions failed validation — AI may have used wrong format"); return; }
+    dbg('Questions with image: '+withImg+', text-only: '+(valid.length-withImg));
+    if (!valid.length) { doneLoading(); showGenError("No valid questions found in AI response."); return; }
     bank.questions = valid; bank.id = Date.now();
     dbg("Saving bank", {topic: bank.topic, questionCount: valid.length});
-    BANKS.push(bank); saveBanks(); renderBanks(); renderBankTopicList();
+    if(window._pageThumb)saveBankImage(bank.id,window._pageThumb);else if(_uploadB64)saveBankImage(bank.id,_uploadB64);
+    if(window._regenBankId){var _rri=-1;for(var _rrj=0;_rrj<BANKS.length;_rrj++){if(BANKS[_rrj].id===window._regenBankId){_rri=_rrj;break;}}if(_rri!==-1){bank.id=window._regenBankId;BANKS[_rri]=bank;}else{BANKS.push(bank);}window._regenBankId=null;}else{BANKS.push(bank);}
+    saveBanks(); renderBanks(); renderBankTopicList();
     var totalQ=0;for(var _tqi=0;_tqi<BANKS.length;_tqi++){totalQ+=(BANKS[_tqi].questions||[]).length;}
     window._genBank = bank; showGenPreview(bank);
     dbg("SUCCESS - bank saved, showing preview");
@@ -2380,7 +2498,8 @@ function generateQs() {
     // Show inline success card too
     var _sc=document.getElementById('gen-success-card');
     var _sm=document.getElementById('gen-success-msg');
-    if(_sm) _sm.textContent='🎉 '+valid.length+' questions saved! Total bank: '+_totalQ2+' questions';
+    var _imgNote = withImg > 0 ? ' ('+withImg+' with page image)' : '';
+    if(_sm) _sm.textContent='🎉 '+valid.length+' questions saved'+_imgNote+'! Total: '+_totalQ2+' Qs';
     if(_sc) _sc.style.display='block';
     // Hide error box
     var errBox=document.getElementById('gen-error-box');
@@ -2410,7 +2529,7 @@ function showGenPreview(bank) {
   var _pqs=bank.questions.slice(0,4);for(var _pqi=0;_pqi<_pqs.length;_pqi++){var q=_pqs[_pqi];var i=_pqi;
     _gh+='<div class="gen-q">'+
       '<div class="gen-q-text">'+(q.diff==='hard'?'🔴':q.diff==='medium'?'🟡':'🟢')+' '+(q.q||'')+'</div>'+
-      '<div class="gen-q-ans">✅ Correct: '+((q.opts||[])[q.ans]||'')+'</div>'+
+      '<div class="gen-q-ans">&#x2705; Correct: '+((q.opts||[])[q.ans]||'')+'</div>'+
       '<div class="gen-q-exp">'+(q.exp||'')+'</div>'+
       '<div class="qp-wrong">❌ Distractors: '+(q.opts||[]).filter(function(_,j){return j!==q.ans;}).join(' · ')+'</div></div>';
   }
@@ -2422,6 +2541,42 @@ function showGenPreview(bank) {
 // ═══════════════════════════════════════════════
 //  BANKS SCREEN
 // ═══════════════════════════════════════════════
+
+function closeRegenModal(){var m=document.getElementById('regen-modal');if(m)m.parentNode.removeChild(m);window._regenBankId=null;}
+
+function regenBank(bankId){
+  var savedImg=loadBankImage(bankId);
+  if(!savedImg){showToast('No saved image. Please upload the photo again.');go('upload');return;}
+  _uploadB64=savedImg; _uploadMime='image/jpeg'; window._regenBankId=bankId;
+  var bank=null; for(var _ri=0;_ri<BANKS.length;_ri++){if(BANKS[_ri].id===bankId){bank=BANKS[_ri];break;}}
+  var existing=document.getElementById('regen-modal');if(existing)existing.parentNode.removeChild(existing);
+  var overlay=document.createElement('div');
+  overlay.id='regen-modal';
+  overlay.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.82);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML=
+    '<div style="background:linear-gradient(145deg,#1a2d45,#0f1f35);border:2px solid rgba(14,165,233,.35);border-radius:20px;padding:26px 22px;max-width:340px;width:100%;text-align:center;">'+
+      '<div style="font-size:1.8rem;margin-bottom:8px;">&#x1F504;</div>'+
+      '<div style="font-size:.98rem;font-weight:900;color:var(--text);margin-bottom:5px;">Re-generate This Bank?</div>'+
+      '<div style="font-size:.8rem;color:var(--amber);font-weight:800;margin-bottom:8px;">'+(bank?bank.topic:'This bank')+'</div>'+
+      '<div style="font-size:.78rem;color:var(--muted2);margin-bottom:12px;line-height:1.5;">Re-sends the saved page image to AI.<br>New questions will replace the current ones.</div>'+
+      '<div style="background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.2);border-radius:9px;padding:9px;margin-bottom:14px;font-size:.74rem;color:var(--green);font-weight:700;">'+
+        '&#x2705; No re-upload needed - using saved image'+
+      '</div>'+
+      '<div style="display:flex;gap:10px;">'+
+        '<button type="button" onclick="closeRegenModal()" style="flex:1;padding:12px;border-radius:11px;border:1.5px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:var(--muted2);font-size:.85rem;font-weight:800;cursor:pointer;">Cancel</button>'+
+        '<button type="button" onclick="doRegenBank()" style="flex:1;padding:12px;border-radius:11px;border:none;background:linear-gradient(135deg,var(--teal),var(--purple));color:#fff;font-size:.88rem;font-weight:900;cursor:pointer;">&#x1F504; Re-generate</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(overlay);
+}
+
+function doRegenBank(){
+  var modal=document.getElementById('regen-modal');
+  if(modal)modal.parentNode.removeChild(modal);
+  goForce('upload');
+  setTimeout(function(){generateQs();},350);
+}
+
 function renderBanks() {
   var el = document.getElementById('banks-list');
   if (!el) return;
@@ -2450,8 +2605,12 @@ function renderBanks() {
       '</div>'+
       '<div class="skill-tags">'+_stags+'</div>'+
       '<div class="bank-btns">'+
-        '<button class="bxs bxs-t" onclick="startBankById('+b.id+')">🎯 Quiz This Bank</button> '+
-        '<button class="bxs bxs-r" onclick="deleteBank('+b.id+')">🗑 Delete</button>'+
+        '<button class="bxs bxs-t" onclick="startBankById('+b.id+')">&#x1F3AF; Quiz</button> '+
+        '<button class="bxs" style="background:rgba(14,165,233,.08);color:var(--teal);border-color:rgba(14,165,233,.25);" onclick="regenBank('+b.id+')">&#x1F504; Re-gen</button> '+
+        '<button class="bxs bxs-r" onclick="deleteBank('+b.id+')">&#x1F5D1;</button>'+
+      '</div>'+
+      '<div style="font-size:.63rem;color:var(--muted2);margin-top:4px;">'+
+        (loadBankImage(b.id) ? '<span style="color:var(--teal);">&#x1F4F7; Image saved</span>' : '<span style="color:var(--red);">&#x1F4F7; No image - tap Re-gen after uploading</span>')+
       '</div></div>';
   }
   el.innerHTML=_bhtml+'</div>';
@@ -2481,6 +2640,8 @@ function showPreTestDialog(questions, topicName, bankCount) {
   window._pretestQuestions = questions;
   window._pretestTimed = true;
   window._pretestCount = Math.min(20, questions.length);
+  window._pretestTopicName = topicName;
+  window._pretestMode = (bankCount === 1 ? 'topic' : 'banks');
 
   var qMax = questions.length;
   var overlay = document.createElement('div');
@@ -2567,9 +2728,11 @@ function launchPreTest() {
   resetQS();
   QS.questions = finalQ;
   QS.targetLen = finalQ.length;
-  QS.mode = 'banks';
-  QS.topicName = 'My Question Banks';
+  QS.mode = (window._pretestMode || 'banks');
+  QS.topicName = (window._pretestTopicName || 'My Question Banks');
   QS.timed = timed;
+  window._pretestMode = null;
+  window._pretestTopicName = null;
   goForce('quiz');
   buildAdaptNodes();
   renderQ();
@@ -2579,9 +2742,8 @@ function deleteBank(id) {
   if (!confirm('Delete this question bank?')) return;
   var idx=-1; for(var _bfi=0;_bfi<BANKS.length;_bfi++){if(BANKS[_bfi].id===id){idx=_bfi;break;}}
   if (idx !== -1) BANKS.splice(idx, 1);
-  saveBanks();
-  renderBanks();
-  renderBankTopicList();
+  deleteBankImage(id);
+  saveBanks(); renderBanks(); renderBankTopicList();
 }
 
 // ═══════════════════════════════════════════════
@@ -2591,7 +2753,7 @@ function renderFlags() {
   var el = document.getElementById('flagged-list');
   if (!el) return;
   if (!FLAGS.length) {
-    el.innerHTML='<div class="empty"><div class="empty-ico">✅</div><p>No flagged questions</p><small>During a quiz, tap 🚩 Flag on any question that seems off</small></div>';
+    el.innerHTML='<div class="empty"><div class="empty-ico">&#x2705;</div><p>No flagged questions</p><small>During a quiz, tap 🚩 Flag on any question that seems off</small></div>';
     return;
   }
   var _fh='<div class="flag-list">';
@@ -2600,12 +2762,12 @@ function renderFlags() {
     var optStr='';
     for(var _oi=0;_oi<opts.length;_oi++){optStr+=(['A','B','C','D'][_oi]||_oi)+') '+opts[_oi]+(_oi<opts.length-1?' · ':'');}
     _fh+='<div class="flag-item">'+
-      '<div class="flag-q">Q: '+(f.q||'—')+'</div>'+
-      '<div class="flag-ans">✅ Correct answer: '+(opts[f.ans]||'—')+'</div>'+
+      '<div class="flag-q">Q: '+(f.q||'-')+'</div>'+
+      '<div class="flag-ans">&#x2705; Correct answer: '+(opts[f.ans]||'-')+'</div>'+
       '<div style="font-size:.73rem;color:var(--muted2);margin-top:4px;">Options: '+optStr+'</div>'+
       (f.exp?'<div style="font-size:.73rem;color:var(--muted2);margin-top:4px;">Explanation: '+f.exp+'</div>':'')+
-      '<div class="flag-src">Source: '+(f.source||'—')+' · Skill: '+(f.skill||'—')+' · Difficulty: '+(f.diff||'—')+'</div>'+
-      '<button class="btn-unflag" onclick="unflag('+_fi+')">✅ Mark as Verified & Remove</button>'+
+      '<div class="flag-src">Source: '+(f.source||'-')+' · Skill: '+(f.skill||'-')+' · Difficulty: '+(f.diff||'-')+'</div>'+
+      '<button class="btn-unflag" onclick="unflag('+_fi+')">&#x2705; Mark as Verified & Remove</button>'+
     '</div>';
   }
   el.innerHTML=_fh+'</div>';
@@ -2615,7 +2777,7 @@ function unflag(i) {
   FLAGS.splice(i, 1);
   saveFlags();
   renderFlags();
-  showToast('✅ Question verified and removed from flags');
+  showToast('&#x2705; Question verified and removed from flags');
 }
 
 // ═══════════════════════════════════════════════
@@ -2641,7 +2803,7 @@ function saveKey() {
   }
   P.apiKey = key;
   saveProgress();
-  if (al) { al.className='alert-msg on alert-ok'; al.textContent='✅ API key saved! You can now generate questions from photos.'; }
+  if (al) { al.className='alert-msg on alert-ok'; al.textContent='&#x2705; API key saved! You can now generate questions from photos.'; }
   checkApiKey();
   setTimeout(function(){if(al)al.className='alert-msg';}, 4000);
 }
@@ -2654,7 +2816,7 @@ function saveProxy() {
   saveProgress();
   if (al) {
     al.className = "alert-msg on alert-ok";
-    al.textContent = url ? ("✅ Proxy set to " + url) : "✅ Proxy cleared — using direct mode";
+    al.textContent = url ? ("&#x2705; Proxy set to " + url) : "&#x2705; Proxy cleared - using direct mode";
     setTimeout(function(){al.className="alert-msg";}, 3000);
   }
 }
@@ -2681,7 +2843,7 @@ function testApiKey() {
     if(!resultEl) return;
     if(r.ok){
       resultEl.style.cssText='display:block;background:rgba(34,197,94,.1);border:1px solid #22c55e;border-radius:10px;padding:12px;margin-top:10px;color:var(--green);font-size:.8rem;font-weight:700;';
-      resultEl.textContent='✅ Groq API key works!';
+      resultEl.textContent='&#x2705; Groq API key works!';
       P.apiKey=key; saveProgress(); checkApiKey();
     } else {
       resultEl.style.cssText='display:block;background:rgba(244,63,94,.1);border:1px solid #f43f5e;border-radius:10px;padding:12px;margin-top:10px;color:#f43f5e;font-size:.78rem;font-weight:700;word-break:break-all;';
@@ -2877,9 +3039,9 @@ function renderHistory() {
     var r=h[_hi];
     var lc=['','pl1','pl2','pl3','pl4'][r.level]||'pl1';
     _hT+='<tr><td>'+(r.date||'')+'</td>'+
-      '<td style="font-size:.75rem">'+(r.topic||'—')+'</td>'+
+      '<td style="font-size:.75rem">'+(r.topic||'-')+'</td>'+
       '<td>'+(r.correct||0)+'/'+(r.total||0)+' <span style="color:var(--muted2);font-size:.75rem">('+( r.acc||0)+'%)</span></td>'+
-      '<td class="mono">'+(r.score||'—')+'</td>'+
+      '<td class="mono">'+(r.score||'-')+'</td>'+
       '<td><span class="pl-badge '+lc+'" style="font-size:.62rem;padding:2px 8px;">L'+(r.level||1)+'</span></td>'+
       '<td style="color:var(--amber)">⭐'+(r.stars||0)+'</td></tr>';
   }
@@ -2899,7 +3061,7 @@ function renderSkillMastery() {
     var _nj=njLevel(r.score||650);
     _smH+='<div style="margin-bottom:9px;">'+
       '<div style="display:flex;justify-content:space-between;font-size:.76rem;font-weight:700;color:var(--muted2);margin-bottom:3px;">'+
-      '<span style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(r.topic||'Test')+' — '+(r.date||'')+'</span>'+
+      '<span style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(r.topic||'Test')+' - '+(r.date||'')+'</span>'+
       '<span style="color:'+((_p>=75)?'var(--green)':(_p>=50)?'var(--amber)':'var(--red)')+'">'+Math.round(_p)+'%</span></div>'+
       '<div style="background:rgba(255,255,255,.06);border-radius:999px;height:7px;overflow:hidden;">'+
       '<div style="height:100%;width:'+_p+'%;background:'+((_p>=75)?'var(--green)':(_p>=50)?'var(--amber)':'var(--red)')+';border-radius:999px;transition:width .6s ease;"></div></div></div>';
