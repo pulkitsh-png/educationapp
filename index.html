@@ -880,6 +880,7 @@ function renderApp() {
         <div class="nav-label">Main</div>
         ${navItem('calendar','📅','Calendar')}
         ${navItem('upcoming','🔔','Upcoming')}
+        ${navItem('study','📚','Study & Exam')}
         <div class="nav-label">Manage</div>
         ${navItem('children','👧','Children')}
         ${navItem('notifications','📬','Notifications')}
@@ -906,7 +907,6 @@ function renderApp() {
       ${mobileNavItem('calendar','📅','Calendar')}
       ${mobileNavItem('upcoming','🔔','Upcoming')}
       ${mobileNavItem('study','📚','Study')}
-      ${navItem('study','📚','Study & Exam')}
       ${mobileNavItem('children','👧','Kids')}
       ${mobileNavItem('notifications','📬','Alerts')}
       ${canEdit() ? mobileNavItem('settings','⚙️','Settings') : ''}
