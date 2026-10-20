@@ -565,6 +565,9 @@ async function sendPasswordReset(email) {
 // ══════════════════════════════════════════════════════════════
 //  DATA OPERATIONS (Firestore)
 // ══════════════════════════════════════════════════════════════
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 const canEdit = () => userProfile?.role === 'admin';
 
 async function saveEvent(ev) {
