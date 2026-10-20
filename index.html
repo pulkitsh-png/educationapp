@@ -427,6 +427,7 @@ async function loadUserProfile(uid) {
     await db.collection('users').doc(uid).set(userProfile);
   }
   attachListeners();
+  renderApp(); 
 }
 
 // ── Firestore real-time listeners ───────────────────────────
