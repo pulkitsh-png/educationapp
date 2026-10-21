@@ -950,13 +950,24 @@ function renderTabContent(today, wd) {
 // ══════════════════════════════════════════════════════════════
 var studyView = 'upload';
 var studyChildId = null;
-var studyGenerated = null;
 var studyExamQuestions = [];
 var studyExamAnswers = {};
 var studyLastResult = null;
-var studySessions = [];
 var studyBankQuestions = [];
 var studyBusy = false;
+var studyActiveBatch = null;
+var studyBatchUnsub = null;
+
+var DIFF_COLORS = {
+  Simple:  { bg: '#e8f8ee', fg: '#1a7f3c', border: '#bbf7d0' },
+  Medium:  { bg: '#eaf2ff', fg: '#1d4ed8', border: '#c6dcff' },
+  Hard:    { bg: '#fff4e5', fg: '#b45309', border: '#fde3b8' },
+  Complex: { bg: '#fdeaea', fg: '#b91c1c', border: '#f8c9c9' },
+};
+function diffBadge(diff) {
+  const c = DIFF_COLORS[diff] || DIFF_COLORS.Medium;
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:.72rem;font-weight:700;background:${c.bg};color:${c.fg};border:1px solid ${c.border}">${esc(diff)}</span>`;
+}
 
 function renderStudyTab() {
   if (!studyChildId && children.length) studyChildId = children[0].id;
@@ -975,68 +986,111 @@ function childPicker() {
 }
 
 function renderUploadView() {
+  const batch = studyActiveBatch;
+  const pct = batch && batch.totalPages ? Math.round(100 * (batch.processedPages || 0) / batch.totalPages) : 0;
+  const batchDone = batch && batch.totalPages && (batch.processedPages || 0) >= batch.totalPages;
+
   return `
-  <div class="card" style="padding:20px;max-width:720px">
+  <div class="card" style="padding:20px;max-width:760px">
     <h2 style="margin-top:0">📚 Study & Exam</h2>
-    <p style="color:#666">Upload a photo of a textbook page and AI will generate practice questions from it, categorized by difficulty.</p>
+    <p style="color:#666">Upload photos (or PDFs) of textbook pages — pick as many as you like at once — and AI will generate practice questions from them, categorized by difficulty.</p>
 
     ${canEdit() ? `
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:16px 0">
         <label>For: ${childPicker()}</label>
+        <input id="study-chapter" type="text" placeholder="Chapter / unit (optional, e.g. Chapter 3)" style="padding:8px;border-radius:8px;border:1px solid #ddd;flex:1;min-width:200px">
         <input id="study-subject-hint" type="text" placeholder="Subject (optional, e.g. Science)" style="padding:8px;border-radius:8px;border:1px solid #ddd;flex:1;min-width:180px">
       </div>
-      <input id="study-file-input" type="file" style="display:none" onchange="handleStudyFileUpload(this)">
+      <input id="study-file-input" type="file" multiple style="display:none" onchange="handleStudyFilesUpload(this)">
       <button class="btn" onclick="document.getElementById('study-file-input').click()" ${studyBusy?'disabled':''}>
-        ${studyBusy ? '⏳ Working…' : '📷 Upload a Page & Generate Questions'}
+        ${studyBusy ? '⏳ Uploading…' : '📷 Upload Pages & Generate Questions'}
       </button>
     ` : `<p style="color:#999">Only an admin can upload new pages.</p>`}
 
-    ${studyGenerated ? `
-      <div style="margin-top:20px;padding:16px;background:#f7faf8;border-radius:10px;border:1px solid #e0e8e3">
-        <strong>✅ Generated: ${esc(studyGenerated.topic)}</strong> (${esc(studyGenerated.subject)}) — ${studyGenerated.count} questions
-        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn" onclick="startExamFromGenerated()">▶️ Start Practice Exam Now</button>
+    ${batch ? `
+      <div style="margin-top:20px;padding:16px;background:${batchDone ? '#f0faf3' : '#eef6ff'};border-radius:10px;border:1px solid ${batchDone ? '#c9ecd6' : '#cfe3fb'}">
+        <strong>${batchDone ? '✅' : '⏳'} ${batch.chapter ? esc(batch.chapter) + ' — ' : ''}${batchDone ? 'Done' : 'Generating questions in the background…'}</strong>
+        <div style="margin-top:6px;color:#555">
+          ${batch.processedPages || 0} of ${batch.totalPages} page(s) processed
+          ${batch.failedPages ? ` — ${batch.failedPages} failed` : ''}
+          ${batch.questionsGenerated ? ` — ${batch.questionsGenerated} questions generated so far` : ''}
         </div>
+        <div style="margin-top:8px;height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden">
+          <div style="height:100%;background:${batchDone ? '#22c55e' : '#3b82f6'};width:${pct}%;transition:width .3s"></div>
+        </div>
+        ${batch.lastError ? `<div style="margin-top:8px;color:#b91c1c;font-size:.82rem">Last error: ${esc(batch.lastError)}</div>` : ''}
       </div>
     ` : ''}
 
-    <div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">
+    <div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <label style="font-size:.85rem;color:#666">Questions per test:
+        <select id="study-exam-count" style="padding:6px 8px;border-radius:8px;border:1px solid #ddd;margin-left:4px">
+          ${[5,10,15,20,25].map(n => `<option value="${n}" ${n===10?'selected':''}>${n}</option>`).join('')}
+        </select>
+      </label>
+      <button class="btn btn-secondary" onclick="startExamFromBank()">📝 Start Practice Exam</button>
+      <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise Weak Topics</button>
       <button class="btn btn-secondary" onclick="openStudyBank()">📖 Browse Question Bank</button>
-      <button class="btn btn-secondary" onclick="startExamFromBank()">📝 Start Mixed Practice Exam</button>
     </div>
-
-    <div id="study-history" style="margin-top:24px"></div>
   </div>`;
 }
 
-async function handleStudyFileUpload(input) {
-  const file = input.files && input.files[0];
-  if (!file) return;
+async function handleStudyFilesUpload(input) {
+  const files = Array.from((input && input.files) || []);
+  if (!files.length) return;
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+
+  const subjectHint = document.getElementById('study-subject-hint')?.value.trim() || '';
+  const chapter = document.getElementById('study-chapter')?.value.trim() || '';
 
   studyBusy = true; renderApp();
   try {
-    const subjectHint = document.getElementById('study-subject-hint')?.value.trim() || '';
-    const path = `examPages/${studyChildId}/${Date.now()}-${file.name}`;
-    await storage.ref().child(path).put(file);
-    showToast('⏳ Reading page and generating questions…');
+    const batchRef = db.collection('uploadBatches').doc();
+    await batchRef.set({
+      childId: studyChildId,
+      chapter,
+      totalPages: files.length,
+      processedPages: 0,
+      failedPages: 0,
+      questionsGenerated: 0,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    watchUploadBatch(batchRef.id);
 
-    const callable = fx.httpsCallable('generate_questions_from_image');
-    const result = await callable({ storagePath: path, childId: studyChildId, subjectHint });
-    studyGenerated = result.data;
-    showToast(`✅ Generated ${result.data.count} questions on "${result.data.topic}"!`);
+    for (const file of files) {
+      const path = `examPages/${studyChildId}/${Date.now()}-${Math.random().toString(36).slice(2)}-${file.name}`;
+      await storage.ref().child(path).put(file, {
+        customMetadata: {
+          childId: studyChildId,
+          subjectHint,
+          chapter,
+          batchId: batchRef.id,
+          uploadedBy: currentUser ? currentUser.uid : '',
+        },
+      });
+    }
+    showToast(`📤 Uploaded ${files.length} page(s). Generating questions in the background — this can take a few minutes.`);
+    input.value = '';
   } catch (e) {
     console.error(e);
-    showToast('❌ ' + (e.message || 'Could not generate questions.'));
+    showToast('❌ ' + (e.message || 'Upload failed.'));
   } finally {
     studyBusy = false;
     renderApp();
   }
 }
 
+function watchUploadBatch(batchId) {
+  if (studyBatchUnsub) studyBatchUnsub();
+  studyBatchUnsub = db.collection('uploadBatches').doc(batchId).onSnapshot(snap => {
+    studyActiveBatch = snap.exists ? snap.data() : null;
+    if (document.getElementById('app')) renderApp();
+  });
+}
+
 async function openStudyBank() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
-  const snap = await db.collection('examQuestions').where('childId','==',studyChildId).orderBy('createdAt','desc').limit(100).get();
+  const snap = await db.collection('examQuestions').where('childId','==',studyChildId).limit(200).get();
   studyBankQuestions = snap.docs.map(d => ({id:d.id, ...d.data()}));
   studyView = 'bank';
   renderApp();
@@ -1045,56 +1099,112 @@ async function openStudyBank() {
 function renderBankView() {
   const byDiff = {Simple:[],Medium:[],Hard:[],Complex:[]};
   studyBankQuestions.forEach(q => { (byDiff[q.difficulty]||byDiff.Medium).push(q); });
-  return `
-  <div class="card" style="padding:20px;max-width:900px">
-    <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">← Back</button>
-    <h2>📖 Question Bank</h2>
-    ${Object.entries(byDiff).map(([diff, qs]) => qs.length ? `
-      <h3 style="margin-top:20px">${diff} (${qs.length})</h3>
-      ${qs.map(q => `
-        <div style="padding:10px;border:1px solid #eee;border-radius:8px;margin-bottom:8px">
-          <div><strong>${esc(q.topic)}</strong> — ${esc(q.question)}</div>
-          <div style="color:#888;font-size:.85rem">Answer: ${esc((q.options||[])[q.correctIndex] || '')}</div>
-        </div>`).join('')}
-    ` : '').join('') || '<p style="color:#999">No questions yet — upload a page first.</p>'}
-  </div>`;
-}
+  const byChapter = {};
+  studyBankQuestions.forEach(q => {
+    const key = q.chapter || '(No chapter tag)';
+    (byChapter[key] = byChapter[key] || []).push(q);
+  });
 
-async function startExamFromGenerated() {
-  studyExamQuestions = studyGenerated.questions || [];
-  studyExamAnswers = {};
-  studyView = 'exam';
-  renderApp();
+  return `
+  <div class="card" style="padding:20px;max-width:960px">
+    <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">← Back</button>
+    <h2>📖 Question Bank <span style="font-weight:400;color:#888;font-size:1rem">(${studyBankQuestions.length} questions)</span></h2>
+
+    ${Object.keys(byChapter).length > 1 || (Object.keys(byChapter)[0] && byChapter[Object.keys(byChapter)[0]].length < studyBankQuestions.length) ? `
+      <div style="margin:8px 0 16px;color:#666;font-size:.85rem">Chapters: ${Object.keys(byChapter).map(c => `${esc(c)} (${byChapter[c].length})`).join(' · ')}</div>
+    ` : ''}
+
+    ${Object.entries(byDiff).map(([diff, qs]) => qs.length ? `
+      <div style="margin-top:22px;display:flex;align-items:center;gap:8px">
+        ${diffBadge(diff)}<span style="color:#888;font-size:.85rem">${qs.length} question${qs.length===1?'':'s'}</span>
+      </div>
+      ${qs.map(q => `
+        <div style="padding:14px;border:1px solid #eee;border-radius:10px;margin-top:8px">
+          <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+            <strong>${esc(q.topic)}</strong>
+            ${q.chapter ? `<span style="color:#999;font-size:.78rem">${esc(q.chapter)}</span>` : ''}
+          </div>
+          <div style="margin-top:6px">${esc(q.question)}</div>
+          <div style="color:#2d9e52;font-size:.85rem;margin-top:6px">✓ ${esc((q.options||[])[q.correctIndex] || '')}</div>
+        </div>`).join('')}
+    ` : '').join('') || '<p style="color:#999;margin-top:16px">No questions yet — upload a page first.</p>'}
+  </div>`;
 }
 
 async function startExamFromBank() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
-  const snap = await db.collection('examQuestions').where('childId','==',studyChildId).limit(50).get();
+  const count = parseInt(document.getElementById('study-exam-count')?.value || '10', 10);
+  const snap = await db.collection('examQuestions').where('childId','==',studyChildId).get();
   const all = snap.docs.map(d => ({id:d.id, ...d.data()}));
   if (!all.length) { showToast('⚠️ No questions yet — upload a page first.'); return; }
-  // shuffle and take up to 10
-  for (let i = all.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [all[i],all[j]]=[all[j],all[i]]; }
-  studyExamQuestions = all.slice(0, 10);
+  const shuffled = all.slice();
+  for (let i = shuffled.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]; }
+  studyExamQuestions = shuffled.slice(0, count);
   studyExamAnswers = {};
   studyView = 'exam';
   renderApp();
 }
 
+async function startRevisionExam() {
+  if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+  const count = parseInt(document.getElementById('study-exam-count')?.value || '10', 10);
+
+  const sessSnap = await db.collection('examSessions').where('childId','==',studyChildId).limit(30).get();
+  const missedByTopic = {};
+  sessSnap.docs.forEach(d => {
+    (d.data().answers || []).forEach(a => {
+      if (!a.correct && a.topic) missedByTopic[a.topic] = (missedByTopic[a.topic] || 0) + 1;
+    });
+  });
+  const weakTopics = Object.keys(missedByTopic).sort((a,b) => missedByTopic[b]-missedByTopic[a]);
+  if (!weakTopics.length) { showToast('No missed questions yet — take a practice exam first, then come back to revise!'); return; }
+
+  const qSnap = await db.collection('examQuestions').where('childId','==',studyChildId).get();
+  const all = qSnap.docs.map(d => ({id:d.id, ...d.data()}));
+  const weakSet = new Set(weakTopics);
+  let pool = all.filter(q => weakSet.has(q.topic));
+  if (pool.length < count) {
+    const rest = all.filter(q => !weakSet.has(q.topic));
+    for (let i = rest.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [rest[i],rest[j]]=[rest[j],rest[i]]; }
+    pool = pool.concat(rest.slice(0, count - pool.length));
+  }
+  for (let i = pool.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
+  studyExamQuestions = pool.slice(0, count);
+  studyExamAnswers = {};
+  studyView = 'exam';
+  showToast(`🔁 Revision exam focused on: ${weakTopics.slice(0,3).join(', ')}${weakTopics.length>3?'…':''}`);
+  renderApp();
+}
+
 function renderExamView() {
+  const total = studyExamQuestions.length;
+  const answeredCount = Object.keys(studyExamAnswers).length;
   return `
-  <div class="card" style="padding:20px;max-width:720px">
-    <h2>📝 Practice Exam</h2>
+  <div class="card" style="padding:20px;max-width:760px">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <h2 style="margin:0">📝 Practice Exam</h2>
+      <span style="color:#666;font-size:.9rem">${answeredCount} of ${total} answered</span>
+    </div>
+    <div style="margin:10px 0 20px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
+      <div style="height:100%;background:#3b82f6;width:${total ? Math.round(100*answeredCount/total) : 0}%;transition:width .2s"></div>
+    </div>
     ${studyExamQuestions.map((q, i) => `
-      <div style="margin-bottom:18px;padding:14px;border:1px solid #eee;border-radius:10px">
-        <div style="font-weight:600;margin-bottom:8px">${i+1}. [${esc(q.difficulty)}] ${esc(q.question)}</div>
+      <div style="margin-bottom:16px;padding:16px;border:1px solid #eee;border-radius:12px;background:${studyExamAnswers[i]!==undefined?'#fafcff':'#fff'}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="color:#999;font-weight:700;font-size:.85rem">Question ${i+1} of ${total}</span>
+          ${diffBadge(q.difficulty)}
+        </div>
+        <div style="font-weight:600;margin-bottom:10px">${esc(q.question)}</div>
         ${(q.options||[]).map((opt, oi) => `
-          <label style="display:block;padding:6px 0;cursor:pointer">
-            <input type="radio" name="q${i}" ${studyExamAnswers[i]===oi?'checked':''} onclick="studyExamAnswers[${i}]=${oi}">
-            ${esc(opt)}
+          <label style="display:flex;align-items:center;gap:8px;padding:9px 12px;margin-bottom:6px;border-radius:8px;border:1px solid ${studyExamAnswers[i]===oi?'#3b82f6':'#e5e7eb'};background:${studyExamAnswers[i]===oi?'#eaf2ff':'#fff'};cursor:pointer">
+            <input type="radio" name="q${i}" ${studyExamAnswers[i]===oi?'checked':''} onclick="studyExamAnswers[${i}]=${oi}; renderApp();">
+            <span>${esc(opt)}</span>
           </label>`).join('')}
       </div>`).join('')}
-    <button class="btn" onclick="submitExam()">✅ Submit Exam</button>
-    <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">Cancel</button>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn" onclick="submitExam()">✅ Submit Exam</button>
+      <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">Cancel</button>
+    </div>
   </div>`;
 }
 
@@ -1117,7 +1227,7 @@ async function submitExam() {
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
   });
 
-  studyLastResult = { score, total, sessionId: sessionRef.id, suggestions: null };
+  studyLastResult = { score, total, sessionId: sessionRef.id, suggestions: null, answers };
   studyView = 'results';
   renderApp();
 
@@ -1134,19 +1244,37 @@ async function submitExam() {
 function renderResultsView() {
   const r = studyLastResult;
   if (!r) return `<p>No results yet.</p>`;
+  const pct = r.total ? Math.round(100 * r.score / r.total) : 0;
+  const missed = (r.answers || []).filter(a => !a.correct);
   return `
   <div class="card" style="padding:20px;max-width:720px">
-    <h2>🎯 Results: ${r.score}/${r.total}</h2>
-    ${r.suggestions ? `
-      <div style="margin-top:14px;padding:14px;background:#f7faf8;border-radius:10px">
-        <strong>💡 Suggestions for next time:</strong>
-        <ul>${r.suggestions.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
+    <h2 style="margin-top:0">🎯 Results: ${r.score}/${r.total} <span style="color:#888;font-weight:400;font-size:1rem">(${pct}%)</span></h2>
+
+    ${missed.length ? `
+      <div style="margin-top:14px">
+        <strong style="color:#b91c1c">Missed questions:</strong>
+        ${missed.map(a => `
+          <div style="margin-top:8px;padding:10px 12px;border-radius:8px;background:#fdeaea;border:1px solid #f8c9c9">
+            <div style="font-size:.85rem;color:#888">${diffBadge(a.difficulty)} <span style="margin-left:6px">${esc(a.topic)}</span></div>
+            <div style="margin-top:4px">${esc(a.question)}</div>
+            <div style="margin-top:4px;font-size:.88rem">You answered: <em>${esc(a.givenAnswer)}</em> — Correct: <strong>${esc(a.correctAnswer)}</strong></div>
+          </div>`).join('')}
       </div>
-    ` : `<p style="color:#888">⏳ Generating improvement suggestions…</p>`}
-    <button class="btn" style="margin-top:16px" onclick="studyView='upload'; studyGenerated=null; renderApp();">Done</button>
+    ` : `<p style="color:#2d9e52;margin-top:14px">🌟 Perfect score — no missed questions!</p>`}
+
+    ${r.suggestions ? `
+      <div style="margin-top:18px;padding:14px;background:#f7faf8;border-radius:10px;border:1px solid #e0e8e3">
+        <strong>💡 Suggestions for next time:</strong>
+        <ul style="margin:8px 0 0 18px">${r.suggestions.map(s => `<li style="margin-bottom:4px">${esc(s)}</li>`).join('')}</ul>
+      </div>
+    ` : `<p style="color:#888;margin-top:14px">⏳ Generating improvement suggestions…</p>`}
+
+    <div style="display:flex;gap:10px;margin-top:18px">
+      <button class="btn" onclick="studyView='upload'; renderApp();">Done</button>
+      <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise These Topics</button>
+    </div>
   </div>`;
 }
-
 // ─── CALENDAR ───────────────────────────────────────────────
 function renderCalendarTab(today, wd) {
   const childTabs = `
