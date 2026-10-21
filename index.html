@@ -1021,7 +1021,7 @@ async function handleStudyFileUpload(input) {
     await storage.ref().child(path).put(file);
     showToast('⏳ Reading page and generating questions…');
 
-    const callable = fx.httpsCallable('generateQuestionsFromImage');
+    const callable = fx.httpsCallable('generate_questions_from_image');
     const result = await callable({ storagePath: path, childId: studyChildId, subjectHint });
     studyGenerated = result.data;
     showToast(`✅ Generated ${result.data.count} questions on "${result.data.topic}"!`);
@@ -1122,7 +1122,7 @@ async function submitExam() {
   renderApp();
 
   try {
-    const callable = fx.httpsCallable('generateInsights');
+    const callable = fx.httpsCallable('generate_insights');
     const result = await callable({ sessionId: sessionRef.id });
     studyLastResult.suggestions = result.data.suggestions;
     renderApp();
