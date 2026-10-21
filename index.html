@@ -959,6 +959,180 @@ var studyActiveBatch = null;
 var studyBatchUnsub = null;
 var studyImageUrlCache = {};
 var studyPages = [];
+var studyBooks = [];
+var studyChapters = [];
+var studyMetaLoadedFor = null;
+var studyChapterId = null;
+var newChapterDraft = { bookId: '', newBookName: '', newBookSubject: '', newBookType: 'curriculum', title: '', testDate: '' };
+var skillReviewDraft = [];
+var skillReviewChapterId = null;
+var skillReviewBusy = false;
+
+async function ensureStudyMetaLoaded() {
+  if (!studyChildId || studyMetaLoadedFor === studyChildId) return;
+  studyMetaLoadedFor = studyChildId; // set before awaiting so we don't re-fire while in flight
+  const [booksSnap, chaptersSnap] = await Promise.all([
+    db.collection('books').where('childId', '==', studyChildId).get(),
+    db.collection('chapters').where('childId', '==', studyChildId).get(),
+  ]);
+  studyBooks = booksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  studyChapters = chaptersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  if (studyChapterId && !studyChapters.find(c => c.id === studyChapterId)) studyChapterId = null;
+  renderApp();
+}
+
+async function refreshChapter(chapterId) {
+  const snap = await db.collection('chapters').doc(chapterId).get();
+  if (!snap.exists) return;
+  const updated = { id: snap.id, ...snap.data() };
+  const idx = studyChapters.findIndex(c => c.id === chapterId);
+  if (idx >= 0) studyChapters[idx] = updated; else studyChapters.push(updated);
+  renderApp();
+}
+
+function getStudyBook(bookId) { return studyBooks.find(b => b.id === bookId); }
+function getStudyChapter(chapterId) { return studyChapters.find(c => c.id === chapterId); }
+
+function renderNewChapterView() {
+  const d = newChapterDraft;
+  const creatingNewBook = d.bookId === '__new__';
+  return `
+  <div class="card" style="padding:20px;max-width:620px">
+    <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">← Back</button>
+    <h2>📂 New Chapter</h2>
+
+    <div style="margin-top:14px">
+      <label style="font-size:.85rem;color:#666;display:block;margin-bottom:4px">Book</label>
+      <select style="width:100%;padding:8px;border-radius:8px;border:1px solid #ddd" onchange="newChapterDraft.bookId=this.value; renderApp();">
+        <option value="" ${!d.bookId?'selected':''}>Choose a book…</option>
+        ${studyBooks.map(b => `<option value="${b.id}" ${d.bookId===b.id?'selected':''}>${esc(b.title)} (${esc(b.subject)}${b.bookType==='accelerated'?' · accelerated':''})</option>`).join('')}
+        <option value="__new__" ${creatingNewBook?'selected':''}>+ New book…</option>
+      </select>
+    </div>
+
+    ${creatingNewBook ? `
+      <div style="margin-top:12px;padding:12px;background:#f7faf8;border-radius:10px;border:1px solid #e0e8e3">
+        <label style="font-size:.85rem;color:#666;display:block;margin-bottom:4px">Book name</label>
+        <input type="text" value="${esc(d.newBookName)}" placeholder="e.g. Grade 5 Math" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ddd" oninput="newChapterDraft.newBookName=this.value">
+        <label style="font-size:.85rem;color:#666;display:block;margin:10px 0 4px">Subject</label>
+        <input type="text" value="${esc(d.newBookSubject)}" placeholder="e.g. Math" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ddd" oninput="newChapterDraft.newBookSubject=this.value">
+        <label style="font-size:.85rem;color:#666;display:block;margin:10px 0 4px">Book type</label>
+        <div style="display:flex;gap:16px">
+          <label><input type="radio" name="bookType" value="curriculum" ${d.newBookType==='curriculum'?'checked':''} onclick="newChapterDraft.newBookType='curriculum'"> Grade-level curriculum</label>
+          <label><input type="radio" name="bookType" value="accelerated" ${d.newBookType==='accelerated'?'checked':''} onclick="newChapterDraft.newBookType='accelerated'"> Accelerated enrichment</label>
+        </div>
+      </div>
+    ` : ''}
+
+    <label style="font-size:.85rem;color:#666;display:block;margin:14px 0 4px">Chapter title</label>
+    <input type="text" value="${esc(d.title)}" placeholder="e.g. Multiplication" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ddd" oninput="newChapterDraft.title=this.value">
+
+    <label style="font-size:.85rem;color:#666;display:block;margin:14px 0 4px">Test date (optional)</label>
+    <input type="date" value="${esc(d.testDate)}" style="padding:8px;border-radius:8px;border:1px solid #ddd" oninput="newChapterDraft.testDate=this.value">
+
+    <div style="margin-top:18px">
+      <button class="btn" onclick="createChapter()" ${studyBusy?'disabled':''}>${studyBusy ? '⏳ Creating…' : '✅ Create Chapter'}</button>
+    </div>
+  </div>`;
+}
+
+async function createChapter() {
+  const d = newChapterDraft;
+  if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+  if (!d.title.trim()) { showToast('⚠️ Give the chapter a title.'); return; }
+  let bookId = d.bookId;
+  if (bookId === '__new__') {
+    if (!d.newBookName.trim()) { showToast('⚠️ Give the new book a name.'); return; }
+    studyBusy = true; renderApp();
+    try {
+      const bookRef = await db.collection('books').add({
+        childId: studyChildId,
+        title: d.newBookName.trim(),
+        subject: d.newBookSubject.trim() || 'Other',
+        bookType: d.newBookType,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      bookId = bookRef.id;
+      studyBooks.push({ id: bookId, childId: studyChildId, title: d.newBookName.trim(), subject: d.newBookSubject.trim() || 'Other', bookType: d.newBookType });
+    } catch (e) {
+      console.error(e); showToast('❌ ' + (e.message || 'Could not create book.')); studyBusy = false; renderApp(); return;
+    }
+  } else if (!bookId) {
+    showToast('⚠️ Choose or create a book first.'); return;
+  }
+
+  studyBusy = true; renderApp();
+  try {
+    const chapterRef = await db.collection('chapters').add({
+      childId: studyChildId,
+      bookId,
+      title: d.title.trim(),
+      testDate: d.testDate || null,
+      skillSuggestions: [],
+      skillsConfirmed: false,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    studyChapters.push({ id: chapterRef.id, childId: studyChildId, bookId, title: d.title.trim(), testDate: d.testDate || null, skillSuggestions: [], skillsConfirmed: false });
+    studyChapterId = chapterRef.id;
+    newChapterDraft = { bookId: '', newBookName: '', newBookSubject: '', newBookType: 'curriculum', title: '', testDate: '' };
+    studyView = 'upload';
+    showToast('✅ Chapter created.');
+  } catch (e) {
+    console.error(e); showToast('❌ ' + (e.message || 'Could not create chapter.'));
+  } finally {
+    studyBusy = false; renderApp();
+  }
+}
+
+function openSkillReview(chapterId) {
+  const ch = getStudyChapter(chapterId);
+  if (!ch) return;
+  skillReviewChapterId = chapterId;
+  skillReviewDraft = Array.from(new Set(ch.skillSuggestions || []));
+  studyView = 'skillReview';
+  renderApp();
+}
+
+function renderSkillReviewView() {
+  const ch = getStudyChapter(skillReviewChapterId);
+  return `
+  <div class="card" style="padding:20px;max-width:620px">
+    <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">← Back</button>
+    <h2>🧩 Suggested Skills${ch ? ` — ${esc(ch.title)}` : ''}</h2>
+    <p style="color:#666">Based on what was uploaded, these look like the skills this chapter covers. Confirm or edit the list before Ivaan starts practicing.</p>
+
+    <div style="margin-top:14px">
+      ${skillReviewDraft.map((s, i) => `
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <input type="text" value="${esc(s)}" style="flex:1;padding:8px;border-radius:8px;border:1px solid #ddd" oninput="skillReviewDraft[${i}]=this.value">
+          <button class="btn btn-secondary btn-sm" onclick="skillReviewDraft.splice(${i},1); renderApp();">✕</button>
+        </div>`).join('') || '<p style="color:#999">No suggestions yet — add skills manually below.</p>'}
+    </div>
+
+    <button class="btn btn-secondary" style="margin-top:6px" onclick="skillReviewDraft.push(''); renderApp();">+ Add skill</button>
+
+    <div style="margin-top:18px">
+      <button class="btn" onclick="submitSkillReview()" ${skillReviewBusy?'disabled':''}>${skillReviewBusy ? '⏳ Saving…' : '✅ Confirm Skills'}</button>
+    </div>
+  </div>`;
+}
+
+async function submitSkillReview() {
+  const skills = skillReviewDraft.map(s => s.trim()).filter(Boolean);
+  if (!skills.length) { showToast('⚠️ Add at least one skill.'); return; }
+  skillReviewBusy = true; renderApp();
+  try {
+    const callable = fx.httpsCallable('confirm_chapter_skills');
+    const result = await callable({ chapterId: skillReviewChapterId, skills });
+    await refreshChapter(skillReviewChapterId);
+    showToast(`✅ ${result.data.skillCount} skill(s) confirmed — ${result.data.taggedQuestionCount} question(s) tagged.`);
+    studyView = 'upload';
+  } catch (e) {
+    console.error(e); showToast('❌ ' + (e.message || 'Could not save skills.'));
+  } finally {
+    skillReviewBusy = false; renderApp();
+  }
+}
 
 async function getPageImageUrl(path) {
   if (studyImageUrlCache[path]) return studyImageUrlCache[path];
@@ -995,17 +1169,20 @@ function diffBadge(diff) {
 
 function renderStudyTab() {
   if (!studyChildId && children.length) studyChildId = children[0].id;
+  ensureStudyMetaLoaded(); // fire-and-forget; re-renders itself once loaded
   switch (studyView) {
-    case 'exam':    return renderExamView();
-    case 'results': return renderResultsView();
-    case 'bank':    return renderBankView();
-    case 'pages':   return renderPagesView();
-    default:        return renderUploadView();
+    case 'exam':        return renderExamView();
+    case 'results':     return renderResultsView();
+    case 'bank':        return renderBankView();
+    case 'pages':       return renderPagesView();
+    case 'newChapter':  return renderNewChapterView();
+    case 'skillReview': return renderSkillReviewView();
+    default:            return renderUploadView();
   }
 }
 
 function childPicker() {
-  return `<select onchange="studyChildId=this.value" style="padding:8px;border-radius:8px;border:1px solid #ddd">
+  return `<select onchange="studyChildId=this.value; studyChapterId=null; renderApp();" style="padding:8px;border-radius:8px;border:1px solid #ddd">
     ${children.map(c => `<option value="${c.id}" ${c.id===studyChildId?'selected':''}>${c.avatar||''} ${esc(c.name)}</option>`).join('')}
   </select>`;
 }
@@ -1014,22 +1191,53 @@ function renderUploadView() {
   const batch = studyActiveBatch;
   const pct = batch && batch.totalPages ? Math.round(100 * (batch.processedPages || 0) / batch.totalPages) : 0;
   const batchDone = batch && batch.totalPages && (batch.processedPages || 0) >= batch.totalPages;
+  const childChapters = studyChapters.filter(c => c.childId === studyChildId);
+  const selectedChapter = getStudyChapter(studyChapterId);
+  const selectedBook = selectedChapter ? getStudyBook(selectedChapter.bookId) : null;
+  const needsSkillReview = selectedChapter && !selectedChapter.skillsConfirmed && (selectedChapter.skillSuggestions || []).length > 0;
 
   return `
   <div class="card" style="padding:20px;max-width:760px">
     <h2 style="margin-top:0">📚 Study & Exam</h2>
-    <p style="color:#666">Upload photos (or PDFs) of textbook pages — pick as many as you like at once — and AI will generate practice questions from them, categorized by difficulty.</p>
+    <p style="color:#666">Organize uploads by chapter — AI will generate practice questions from scanned pages and suggest the skills each chapter covers.</p>
+
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:16px 0">
+      <label>For: ${childPicker()}</label>
+    </div>
 
     ${canEdit() ? `
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:16px 0">
-        <label>For: ${childPicker()}</label>
-        <input id="study-chapter" type="text" placeholder="Chapter / unit (optional, e.g. Chapter 3)" style="padding:8px;border-radius:8px;border:1px solid #ddd;flex:1;min-width:200px">
-        <input id="study-subject-hint" type="text" placeholder="Subject (optional, e.g. Science)" style="padding:8px;border-radius:8px;border:1px solid #ddd;flex:1;min-width:180px">
+      <div style="margin:16px 0">
+        <label style="font-size:.85rem;color:#666;display:block;margin-bottom:4px">Chapter</label>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select style="padding:8px;border-radius:8px;border:1px solid #ddd;flex:1;min-width:220px" onchange="studyChapterId=this.value||null; renderApp();">
+            <option value="">Choose a chapter…</option>
+            ${childChapters.map(c => {
+              const book = getStudyBook(c.bookId);
+              return `<option value="${c.id}" ${c.id===studyChapterId?'selected':''}>${book ? esc(book.title) + ' — ' : ''}${esc(c.title)}</option>`;
+            }).join('')}
+          </select>
+          <button class="btn btn-secondary" onclick="studyView='newChapter'; renderApp();">+ New Chapter</button>
+        </div>
+        ${selectedChapter ? `
+          <div style="margin-top:8px;color:#888;font-size:.85rem">
+            ${selectedBook ? `📘 ${esc(selectedBook.title)} (${esc(selectedBook.subject)}${selectedBook.bookType==='accelerated'?' · accelerated':''})` : ''}
+            ${selectedChapter.testDate ? ` · 🗓️ Test: ${esc(selectedChapter.testDate)}` : ''}
+          </div>
+        ` : ''}
       </div>
+
+      ${needsSkillReview ? `
+        <div style="margin:10px 0 16px;padding:12px 16px;background:#fff8ea;border:1px solid #fde3b8;border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>🧩 ${selectedChapter.skillSuggestions.length} suggested skill(s) ready for review</span>
+          <button class="btn btn-secondary btn-sm" onclick="openSkillReview('${selectedChapter.id}')">Review Skills</button>
+        </div>
+      ` : ''}
+
       <input id="study-file-input" type="file" multiple style="display:none" onchange="handleStudyFilesUpload(this)">
-      <button class="btn" onclick="document.getElementById('study-file-input').click()" ${studyBusy?'disabled':''}>
+      <button class="btn" onclick="document.getElementById('study-file-input').click()" ${studyBusy || !studyChapterId ?'disabled':''}>
         ${studyBusy ? '⏳ Uploading…' : '📷 Upload Pages & Generate Questions'}
       </button>
+      ${!studyChapterId ? `<span style="color:#aaa;font-size:.82rem;margin-left:8px">Pick or create a chapter first</span>` : ''}
     ` : `<p style="color:#999">Only an admin can upload new pages.</p>`}
 
     ${batch ? `
@@ -1120,9 +1328,12 @@ async function handleStudyFilesUpload(input) {
   const files = Array.from((input && input.files) || []);
   if (!files.length) return;
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+  if (!studyChapterId) { showToast('⚠️ Pick or create a chapter first.'); return; }
 
-  const subjectHint = document.getElementById('study-subject-hint')?.value.trim() || '';
-  const chapter = document.getElementById('study-chapter')?.value.trim() || '';
+  const chapterObj = getStudyChapter(studyChapterId);
+  const bookObj = chapterObj ? getStudyBook(chapterObj.bookId) : null;
+  const chapter = chapterObj ? chapterObj.title : '';
+  const subjectHint = bookObj ? bookObj.subject : '';
 
   studyBusy = true; renderApp();
   try {
@@ -1130,13 +1341,15 @@ async function handleStudyFilesUpload(input) {
     await batchRef.set({
       childId: studyChildId,
       chapter,
+      chapterId: studyChapterId,
+      bookId: chapterObj ? chapterObj.bookId : null,
       totalPages: files.length,
       processedPages: 0,
       failedPages: 0,
       questionsGenerated: 0,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
-    watchUploadBatch(batchRef.id);
+    watchUploadBatch(batchRef.id, studyChapterId);
 
     for (const file of files) {
       const path = `examPages/${studyChildId}/${Date.now()}-${Math.random().toString(36).slice(2)}-${file.name}`;
@@ -1145,6 +1358,8 @@ async function handleStudyFilesUpload(input) {
           childId: studyChildId,
           subjectHint,
           chapter,
+          chapterId: studyChapterId,
+          bookId: chapterObj ? chapterObj.bookId : '',
           batchId: batchRef.id,
           uploadedBy: currentUser ? currentUser.uid : '',
         },
@@ -1161,10 +1376,17 @@ async function handleStudyFilesUpload(input) {
   }
 }
 
-function watchUploadBatch(batchId) {
+function watchUploadBatch(batchId, chapterId) {
   if (studyBatchUnsub) studyBatchUnsub();
+  let wasDone = false;
   studyBatchUnsub = db.collection('uploadBatches').doc(batchId).onSnapshot(snap => {
     studyActiveBatch = snap.exists ? snap.data() : null;
+    const b = studyActiveBatch;
+    const nowDone = b && b.totalPages && (b.processedPages || 0) >= b.totalPages;
+    if (nowDone && !wasDone && (chapterId || (b && b.chapterId))) {
+      wasDone = true;
+      refreshChapter(chapterId || b.chapterId);
+    }
     if (document.getElementById('app')) renderApp();
   });
 }
