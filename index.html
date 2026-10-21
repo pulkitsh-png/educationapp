@@ -985,7 +985,7 @@ function renderUploadView() {
         <label>For: ${childPicker()}</label>
         <input id="study-subject-hint" type="text" placeholder="Subject (optional, e.g. Science)" style="padding:8px;border-radius:8px;border:1px solid #ddd;flex:1;min-width:180px">
       </div>
-      <input id="study-file-input" type="file" accept="image/*" style="display:none" onchange="handleStudyFileUpload(this)">
+      <input id="study-file-input" type="file" style="display:none" onchange="handleStudyFileUpload(this)">
       <button class="btn" onclick="document.getElementById('study-file-input').click()" ${studyBusy?'disabled':''}>
         ${studyBusy ? '⏳ Working…' : '📷 Upload a Page & Generate Questions'}
       </button>
