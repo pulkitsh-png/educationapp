@@ -957,6 +957,30 @@ var studyBankQuestions = [];
 var studyBusy = false;
 var studyActiveBatch = null;
 var studyBatchUnsub = null;
+var studyImageUrlCache = {};
+var studyPages = [];
+
+async function getPageImageUrl(path) {
+  if (studyImageUrlCache[path]) return studyImageUrlCache[path];
+  const url = await storage.ref(path).getDownloadURL();
+  studyImageUrlCache[path] = url;
+  return url;
+}
+
+function renderPageReference(q) {
+  if (!q.requiresImage || !q.sourceImage) return '';
+  const url = studyImageUrlCache[q.sourceImage];
+  if (!url) return '';
+  if (q.sourceImage.toLowerCase().endsWith('.pdf')) {
+    return `<div style="margin-bottom:10px"><a href="${url}" target="_blank" rel="noopener" class="btn btn-secondary">📄 View reference page</a></div>`;
+  }
+  return `<div style="margin-bottom:10px"><img src="${url}" style="max-width:100%;max-height:320px;border-radius:8px;border:1px solid #ddd;display:block" alt="Reference page"></div>`;
+}
+
+async function prefetchExamImages(questions) {
+  const paths = Array.from(new Set(questions.filter(q => q.requiresImage && q.sourceImage).map(q => q.sourceImage)));
+  await Promise.all(paths.map(p => getPageImageUrl(p).catch(() => {})));
+}
 
 var DIFF_COLORS = {
   Simple:  { bg: '#e8f8ee', fg: '#1a7f3c', border: '#bbf7d0' },
@@ -975,6 +999,7 @@ function renderStudyTab() {
     case 'exam':    return renderExamView();
     case 'results': return renderResultsView();
     case 'bank':    return renderBankView();
+    case 'pages':   return renderPagesView();
     default:        return renderUploadView();
   }
 }
@@ -1031,8 +1056,64 @@ function renderUploadView() {
       <button class="btn btn-secondary" onclick="startExamFromBank()">📝 Start Practice Exam</button>
       <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise Weak Topics</button>
       <button class="btn btn-secondary" onclick="openStudyBank()">📖 Browse Question Bank</button>
+      <button class="btn btn-secondary" onclick="openPageGallery()">🖼️ View Scanned Pages</button>
     </div>
   </div>`;
+}
+
+async function openPageGallery() {
+  if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+  const snap = await db.collection('examQuestions').where('childId','==',studyChildId).get();
+  const seen = {};
+  snap.docs.forEach(d => {
+    const q = d.data();
+    if (!q.sourceImage || seen[q.sourceImage]) return;
+    seen[q.sourceImage] = { path: q.sourceImage, topic: q.topic, chapter: q.chapter, subject: q.subject, url: null };
+  });
+  studyPages = Object.values(seen).sort((a,b) => (a.chapter||'').localeCompare(b.chapter||'') || (a.topic||'').localeCompare(b.topic||''));
+  studyView = 'pages';
+  renderApp();
+
+  for (const p of studyPages) {
+    if (p.path.toLowerCase().endsWith('.pdf')) continue;
+    try { p.url = await getPageImageUrl(p.path); } catch (e) { p.url = null; }
+    if (studyView === 'pages') renderApp();
+  }
+}
+
+function renderPagesView() {
+  return `
+  <div class="card" style="padding:20px;max-width:960px">
+    <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">← Back</button>
+    <h2>🖼️ Scanned Pages <span style="font-weight:400;color:#888;font-size:1rem">(${studyPages.length})</span></h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:16px">
+      ${studyPages.map(p => {
+        const isPdf = p.path.toLowerCase().endsWith('.pdf');
+        return `
+        <div style="border:1px solid #eee;border-radius:10px;overflow:hidden;background:#fafafa">
+          ${isPdf ? `
+            <a href="${p.path}" onclick="return false" style="display:flex;height:120px;align-items:center;justify-content:center;font-size:2.2rem;background:#f1f1f1;text-decoration:none">📄</a>
+          ` : p.url ? `
+            <img src="${p.url}" style="width:100%;height:120px;object-fit:cover;display:block" loading="lazy">
+          ` : `<div style="height:120px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:.8rem">Loading…</div>`}
+          <div style="padding:8px">
+            <div style="font-weight:600;font-size:.85rem">${esc(p.topic || 'Untitled')}</div>
+            ${p.chapter ? `<div style="color:#999;font-size:.75rem">${esc(p.chapter)}</div>` : ''}
+            <button class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%" onclick="openPageFullSize('${p.path.replace(/'/g,"\\'")}')">Open full size ↗</button>
+          </div>
+        </div>`;
+      }).join('') || '<p style="color:#999">No scanned pages yet.</p>'}
+    </div>
+  </div>`;
+}
+
+async function openPageFullSize(path) {
+  try {
+    const url = await getPageImageUrl(path);
+    window.open(url, '_blank', 'noopener');
+  } catch (e) {
+    showToast('⚠️ Could not open page.');
+  }
 }
 
 async function handleStudyFilesUpload(input) {
@@ -1141,6 +1222,7 @@ async function startExamFromBank() {
   for (let i = shuffled.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]; }
   studyExamQuestions = shuffled.slice(0, count);
   studyExamAnswers = {};
+  await prefetchExamImages(studyExamQuestions);
   studyView = 'exam';
   renderApp();
 }
@@ -1171,6 +1253,7 @@ async function startRevisionExam() {
   for (let i = pool.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
   studyExamQuestions = pool.slice(0, count);
   studyExamAnswers = {};
+  await prefetchExamImages(studyExamQuestions);
   studyView = 'exam';
   showToast(`🔁 Revision exam focused on: ${weakTopics.slice(0,3).join(', ')}${weakTopics.length>3?'…':''}`);
   renderApp();
@@ -1194,6 +1277,7 @@ function renderExamView() {
           <span style="color:#999;font-weight:700;font-size:.85rem">Question ${i+1} of ${total}</span>
           ${diffBadge(q.difficulty)}
         </div>
+        ${renderPageReference(q)}
         <div style="font-weight:600;margin-bottom:10px">${esc(q.question)}</div>
         ${(q.options||[]).map((opt, oi) => `
           <label style="display:flex;align-items:center;gap:8px;padding:9px 12px;margin-bottom:6px;border-radius:8px;border:1px solid ${studyExamAnswers[i]===oi?'#3b82f6':'#e5e7eb'};background:${studyExamAnswers[i]===oi?'#eaf2ff':'#fff'};cursor:pointer">
@@ -1274,6 +1358,7 @@ function renderResultsView() {
       <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise These Topics</button>
     </div>
   </div>`;
+}
 }
 // ─── CALENDAR ───────────────────────────────────────────────
 function renderCalendarTab(today, wd) {
