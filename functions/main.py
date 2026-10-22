@@ -58,23 +58,49 @@ def _guess_mime_type(path: str) -> str:
     }.get(ext, "image/jpeg")
 
 
-def _crop_image_region(file_bytes: bytes, mime_type: str, region: dict | None) -> bytes | None:
-    """Crops the figure/diagram a question refers to out of the full scanned
-    page, so the question can show just that picture instead of a link to
-    the whole page. `region` is Gemini's bounding box for that figure --
-    {yMin, xMin, yMax, xMax} on a 0-1000 normalized scale (Gemini's own
-    object-detection convention), (0,0) = top-left of the page.
+def _render_source_to_image(file_bytes: bytes, mime_type: str, pdf_page_index: int | None) -> "Image.Image | None":
+    """Returns a PIL Image of the page to crop from -- either the uploaded
+    image as-is, or (for a PDF) that specific page rendered to a raster
+    image via pypdfium2 at a high enough resolution for a clean crop.
+    Returns None on any failure or an unsupported type."""
+    if mime_type.startswith("image/"):
+        return Image.open(io.BytesIO(file_bytes)).convert("RGB")
+    if mime_type == "application/pdf":
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(file_bytes)
+        try:
+            page_index = pdf_page_index if isinstance(pdf_page_index, int) and 0 <= pdf_page_index < len(pdf) else 0
+            page = pdf[page_index]
+            # scale=3 -> ~216 DPI off a standard 72-DPI PDF page; plenty
+            # sharp for a cropped figure without being huge.
+            bitmap = page.render(scale=3)
+            return bitmap.to_pil().convert("RGB")
+        finally:
+            pdf.close()
+    return None
 
-    Returns JPEG bytes, or None if there's nothing to crop (PDF source,
-    missing/degenerate box, or any decoding error) -- callers fall back to
-    linking the full page, exactly like before this existed."""
-    if not mime_type.startswith("image/") or not region:
+
+def _crop_image_region(file_bytes: bytes, mime_type: str, region: dict | None, pdf_page_index: int | None = None) -> bytes | None:
+    """Crops the figure/diagram a question refers to out of the full scanned
+    page (rendering the right page first if the source is a PDF), so the
+    question can show just that picture instead of a link to the whole
+    page. `region` is Gemini's bounding box for that figure -- {yMin, xMin,
+    yMax, xMax} on a 0-1000 normalized scale (Gemini's own object-detection
+    convention), (0,0) = top-left of the page.
+
+    Returns JPEG bytes, or None if there's nothing to crop (missing/
+    degenerate box, unsupported source, or any decoding/rendering error)
+    -- callers fall back to linking the full page, exactly like before
+    cropping existed."""
+    if not region:
         return None
     try:
         y_min, x_min, y_max, x_max = (region.get(k) for k in ("yMin", "xMin", "yMax", "xMax"))
         if None in (y_min, x_min, y_max, x_max):
             return None
-        img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+        img = _render_source_to_image(file_bytes, mime_type, pdf_page_index)
+        if img is None:
+            return None
         w, h = img.size
         left = max(0, min(w, round(x_min / 1000 * w)))
         right = max(0, min(w, round(x_max / 1000 * w)))
@@ -195,6 +221,7 @@ Read all the content provided, then write exactly 8 multiple-choice questions te
 For each question, also decide:
 - "requiresImage": true only if the question genuinely cannot be answered from text alone -- e.g. "label the diagram", "what does the chart show", "identify the part shown in the picture". Set it false for ordinary questions, even if the page happens to contain a picture somewhere.
 - "imageRegion": ONLY when requiresImage is true -- the bounding box of the SPECIFIC diagram/chart/picture this question refers to (not the whole page), as {{"yMin":0,"xMin":0,"yMax":1000,"xMax":1000}} on a 0-1000 normalized scale where (0,0) is the page's top-left corner and (1000,1000) is its bottom-right corner. Draw it tight around just that figure. When requiresImage is false, set imageRegion to null.
+- "pdfPageIndex": ONLY relevant when the source file is a PDF and requiresImage is true -- the 0-based index of the PDF page the imageRegion box is on (0 = first page). If the source is a single image (not a PDF), or requiresImage is false, set this to null.
 - "skillName": a short, concrete, learnable skill phrase this question practices, written the way a teacher would name it on a skills list -- e.g. "Multiply multi-digit whole numbers", "Identify the subject of a sentence", "Estimate products". Not a broad topic like "Multiplication" and not the question restated -- a specific, practiceable skill. Use the SAME skillName text for different questions that practice the same skill.{skill_vocab_block}
 
 Return ONLY valid JSON, no markdown fences, no commentary:
@@ -202,7 +229,7 @@ Return ONLY valid JSON, no markdown fences, no commentary:
   "topic": "short topic name",
   "subject": "Science | Math | English | Social Studies | Other",
   "questions": [
-    {{ "difficulty": "Simple", "question": "...", "options": ["...","...","...","..."], "correctIndex": 0, "explanation": "one sentence", "requiresImage": false, "imageRegion": null, "skillName": "..." }}
+    {{ "difficulty": "Simple", "question": "...", "options": ["...","...","...","..."], "correctIndex": 0, "explanation": "one sentence", "requiresImage": false, "imageRegion": null, "pdfPageIndex": null, "skillName": "..." }}
   ]
 }}"""
 
@@ -234,7 +261,7 @@ Return ONLY valid JSON, no markdown fences, no commentary:
             # failure here just means no cropped image, never a lost question.
             cropped_image_path = None
             if q.get("requiresImage"):
-                cropped_bytes = _crop_image_region(file_bytes, mime_type, q.get("imageRegion"))
+                cropped_bytes = _crop_image_region(file_bytes, mime_type, q.get("imageRegion"), q.get("pdfPageIndex"))
                 if cropped_bytes:
                     candidate_path = f"examPages/{child_id}/crops/{ref.id}.jpg"
                     try:

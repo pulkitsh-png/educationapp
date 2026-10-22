@@ -2,3 +2,4 @@ firebase-functions
 firebase-admin
 google-genai
 Pillow
+pypdfium2
