@@ -978,6 +978,39 @@ var studyFullLevel = 1;
 var studyFullAnswer = undefined;
 var studyFullTarget = 45;
 var studyFullBusy = false;
+var studyTimerStartedAt = null; // Date.now() when the current exam/test started -- recorded, never enforced (no time limit)
+var studyTimerHandle = null;
+
+function formatElapsed(ms) {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function startStudyTimer() {
+  stopStudyTimer();
+  studyTimerStartedAt = Date.now();
+  studyTimerHandle = setInterval(() => {
+    const el = document.getElementById('study-timer');
+    if (el) el.textContent = `⏱ ${formatElapsed(Date.now() - studyTimerStartedAt)}`;
+  }, 1000);
+}
+
+function stopStudyTimer() {
+  if (studyTimerHandle) { clearInterval(studyTimerHandle); studyTimerHandle = null; }
+}
+
+function elapsedStudySeconds() {
+  return studyTimerStartedAt ? Math.round((Date.now() - studyTimerStartedAt) / 1000) : null;
+}
+
+function formatTimeTaken(sec) {
+  if (sec === null || sec === undefined) return '';
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
 
 async function ensureStudyMetaLoaded() {
   if (!studyChildId || studyMetaLoadedFor === studyChildId) return;
@@ -1410,13 +1443,22 @@ function renderStudentChapterHome(chapter, stats) {
   if (questionsAvailable === null) return `<p style="color:#888">Loading…</p>`;
   if (questionsAvailable === 0) return `<p style="color:#888">Nothing to practice yet for this chapter — check back once your parent adds some pages!</p>`;
   return `
-    <div style="margin:14px 0">
-      <button class="btn" style="font-size:1.05rem;padding:16px 26px" onclick="startExamFromBank()">📝 Practice Now</button>
+    <div style="margin:14px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn" style="font-size:1.05rem;padding:16px 26px" onclick="toggleQuickSetup()">📝 Short Practice Test</button>
+      ${studyQuickSetupOpen ? `
+        <span style="font-size:.9rem;color:#666">Questions:
+          <select id="study-exam-count" style="padding:6px 8px;border-radius:6px;border:1px solid #ddd;font-size:.9rem">
+            ${[5,10,15,20,25].map(n => `<option value="${n}" ${n===10?'selected':''}>${n}</option>`).join('')}
+          </select>
+        </span>
+        <button class="btn" onclick="startExamFromBank()">Start →</button>
+      ` : ''}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise what felt tricky</button>
-      <button class="btn btn-secondary" onclick="startFullLengthTest()" ${studyFullBusy?'disabled':''}>${studyFullBusy ? '⏳ Preparing…' : '🎯 Full-Length Test'}</button>
+      <button class="btn btn-secondary" onclick="startFullLengthTest()" ${studyFullBusy?'disabled':''}>${studyFullBusy ? '⏳ Preparing…' : '🎯 Full-Length Test (45 questions)'}</button>
     </div>
+    <div style="margin-top:10px;color:#aaa;font-size:.78rem">Nothing here is timed — we just quietly record how long each one takes, for your parent to see.</div>
   `;
 }
 
@@ -1636,6 +1678,7 @@ async function startExamFromBank() {
   studyExamAnswers = {};
   await prefetchExamImages(studyExamQuestions);
   studyView = 'exam';
+  startStudyTimer();
   renderApp();
 }
 
@@ -1669,6 +1712,7 @@ async function startRevisionExam() {
   studyExamAnswers = {};
   await prefetchExamImages(studyExamQuestions);
   studyView = 'exam';
+  startStudyTimer();
   showToast(`🔁 Revision focused on: ${weakKeys.slice(0,3).join(', ')}${weakKeys.length>3?'…':''}`);
   renderApp();
 }
@@ -1680,8 +1724,9 @@ function renderExamView() {
   <div class="card" style="padding:20px;max-width:760px">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <h2 style="margin:0">📝 Practice Exam</h2>
-      <span style="color:#666;font-size:.9rem">${answeredCount} of ${total} answered</span>
+      <span style="color:#666;font-size:.9rem">${answeredCount} of ${total} answered · <span id="study-timer" style="color:#999">⏱ ${formatElapsed(studyTimerStartedAt ? Date.now()-studyTimerStartedAt : 0)}</span></span>
     </div>
+    <div style="margin-top:-6px;margin-bottom:10px;color:#aaa;font-size:.75rem">Not timed — this just records how long practice takes, for your parent's reference.</div>
     <div style="margin:10px 0 20px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
       <div style="height:100%;background:#3b82f6;width:${total ? Math.round(100*answeredCount/total) : 0}%;transition:width .2s"></div>
     </div>
@@ -1701,7 +1746,7 @@ function renderExamView() {
       </div>`).join('')}
     <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn" onclick="submitExam()">✅ Submit Exam</button>
-      <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">Cancel</button>
+      <button class="btn btn-secondary" onclick="stopStudyTimer(); studyView='home'; renderApp();">Cancel</button>
     </div>
   </div>`;
 }
@@ -1727,6 +1772,7 @@ function startFullLengthTest() {
     if (!first) { showToast('⚠️ Not enough question variety to start a full-length test.'); renderApp(); return; }
     studyFullCurrentQ = first;
     studyView = 'fullExam';
+    startStudyTimer();
     renderApp();
     prefetchExamImages([first]).then(() => { if (studyView === 'fullExam') renderApp(); });
   }).catch(e => {
@@ -1772,8 +1818,9 @@ function renderFullExamView() {
   <div class="card" style="padding:20px;max-width:760px">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <h2 style="margin:0">🎯 Full-Length Test</h2>
-      <span style="color:#666;font-size:.9rem">Question ${n} of ${total}</span>
+      <span style="color:#666;font-size:.9rem">Question ${n} of ${total} · <span id="study-timer" style="color:#999">⏱ ${formatElapsed(studyTimerStartedAt ? Date.now()-studyTimerStartedAt : 0)}</span></span>
     </div>
+    <div style="margin-bottom:10px;color:#aaa;font-size:.75rem">Not timed — this just records how long the test takes, for your parent's reference.</div>
     <div style="margin:10px 0 14px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
       <div style="height:100%;background:#d4521a;width:${Math.round(100*(n-1)/total)}%;transition:width .2s"></div>
     </div>
@@ -1827,6 +1874,8 @@ function submitFullAnswer() {
 }
 
 async function finishFullTest() {
+  const timeTakenSeconds = elapsedStudySeconds();
+  stopStudyTimer();
   const progression = studyFullProgression;
   const total = progression.length;
   const score = progression.filter(p => p.correct).length;
@@ -1846,11 +1895,11 @@ async function finishFullTest() {
     childId: studyChildId, score, total, answers,
     testType: 'full',
     progression: progression.map(p => ({ n: p.n, difficulty: p.difficulty, difficultyIndex: p.difficultyIndex, correct: p.correct, topic: p.topic, skillId: p.skillId })),
-    weightedScore, highestDifficulty,
+    weightedScore, highestDifficulty, timeTakenSeconds,
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
   });
 
-  studyLastResult = { score, total, sessionId: sessionRef.id, suggestions: null, answers, testType: 'full', weightedScore, highestDifficulty, progression };
+  studyLastResult = { score, total, sessionId: sessionRef.id, suggestions: null, answers, testType: 'full', weightedScore, highestDifficulty, progression, timeTakenSeconds };
   studyFullPool = null; studyFullCurrentQ = null; studyFullProgression = [];
   studyView = 'results';
   renderApp();
@@ -1866,6 +1915,8 @@ async function finishFullTest() {
 }
 
 async function submitExam() {
+  const timeTakenSeconds = elapsedStudySeconds();
+  stopStudyTimer();
   const answers = studyExamQuestions.map((q, i) => {
     const givenIdx = studyExamAnswers[i];
     const correct = givenIdx === q.correctIndex;
@@ -1882,10 +1933,11 @@ async function submitExam() {
 
   const sessionRef = await db.collection('examSessions').add({
     childId: studyChildId, score, total, answers,
+    timeTakenSeconds,
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
   });
 
-  studyLastResult = { score, total, sessionId: sessionRef.id, suggestions: null, answers };
+  studyLastResult = { score, total, sessionId: sessionRef.id, suggestions: null, answers, timeTakenSeconds };
   studyView = 'results';
   renderApp();
 
@@ -1917,6 +1969,7 @@ function renderResultsView() {
   return `
   <div class="card" style="padding:20px;max-width:720px">
     <h2 style="margin-top:0">🎯 Results: ${r.score}/${r.total} <span style="color:#888;font-weight:400;font-size:1rem">(${pct}%)</span></h2>
+    ${r.timeTakenSeconds != null ? `<div style="color:#999;font-size:.82rem;margin-top:-4px;margin-bottom:10px">⏱ Time taken: ${formatTimeTaken(r.timeTakenSeconds)} (not timed — recorded for reference only)</div>` : ''}
 
     ${r.testType === 'full' ? `
       <div style="margin:14px 0;padding:14px;background:#fef0eb;border:1px solid #fcd9c8;border-radius:10px">
