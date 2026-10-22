@@ -1275,7 +1275,17 @@ async function getPageImageUrl(path) {
 }
 
 function renderPageReference(q) {
-  if (!q.requiresImage || !q.sourceImage) return '';
+  if (!q.requiresImage) return '';
+  // Prefer the cropped figure (just the diagram this question is about) --
+  // falls back to linking/showing the full scanned page for older questions
+  // generated before cropping existed, or when the source was a PDF.
+  if (q.croppedImage) {
+    const cropUrl = studyImageUrlCache[q.croppedImage];
+    if (cropUrl) {
+      return `<div style="margin-bottom:10px"><img src="${cropUrl}" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid #ddd;display:block" alt="Figure for this question"></div>`;
+    }
+  }
+  if (!q.sourceImage) return '';
   const url = studyImageUrlCache[q.sourceImage];
   if (!url) return '';
   if (q.sourceImage.toLowerCase().endsWith('.pdf')) {
@@ -1304,8 +1314,13 @@ function renderQuestionTrace(q, n, total) {
 }
 
 async function prefetchExamImages(questions) {
-  const paths = Array.from(new Set(questions.filter(q => q.requiresImage && q.sourceImage).map(q => q.sourceImage)));
-  await Promise.all(paths.map(p => getPageImageUrl(p).catch(() => {})));
+  const paths = new Set();
+  questions.forEach(q => {
+    if (!q.requiresImage) return;
+    if (q.croppedImage) paths.add(q.croppedImage);
+    else if (q.sourceImage) paths.add(q.sourceImage); // fallback for pre-cropping questions
+  });
+  await Promise.all(Array.from(paths).map(p => getPageImageUrl(p).catch(() => {})));
 }
 
 var DIFF_COLORS = {
@@ -1659,6 +1674,7 @@ async function openStudyBank() {
   studyBankQuestions = snap.docs.map(d => ({id:d.id, ...d.data()})).filter(q => q.chapterId === studyChapterId);
   studyView = 'bank';
   renderApp();
+  prefetchExamImages(studyBankQuestions).then(() => { if (studyView === 'bank') renderApp(); });
 }
 
 function renderBankView() {
@@ -1690,6 +1706,7 @@ function renderBankView() {
             ${q.chapter ? `<span style="color:#999;font-size:.78rem">${esc(q.chapter)}</span>` : ''}
           </div>
           <div style="margin-top:6px">${esc(q.question)}</div>
+          ${renderPageReference(q)}
           <div style="color:#2d9e52;font-size:.85rem;margin-top:6px">✓ ${esc((q.options||[])[q.correctIndex] || '')}</div>
           ${renderQuestionTrace(q, qi + 1, qs.length)}
         </div>`).join('')}
@@ -1906,6 +1923,8 @@ function submitFullAnswer() {
     skillId: q.skillId || null,
     skillName: q.skillName || '',
     sourceImage: q.sourceImage || null,
+    croppedImage: q.croppedImage || null,
+    requiresImage: !!q.requiresImage,
     pageNumber: q.pageNumber || null,
     pageCount: q.pageCount || null,
     sourceFileName: q.sourceFileName || '',
@@ -1945,7 +1964,8 @@ async function finishFullTest() {
     topic: p.topic, difficulty: p.difficulty, question: p.question,
     givenAnswer: p.givenAnswer, correctAnswer: p.correctAnswer, correct: p.correct,
     skillId: p.skillId, skillName: p.skillName, questionId: p.questionId || null,
-    sourceImage: p.sourceImage || null, pageNumber: p.pageNumber || null,
+    sourceImage: p.sourceImage || null, croppedImage: p.croppedImage || null,
+    requiresImage: !!p.requiresImage, pageNumber: p.pageNumber || null,
     pageCount: p.pageCount || null, sourceFileName: p.sourceFileName || '',
   }));
 
@@ -1961,6 +1981,7 @@ async function finishFullTest() {
   studyFullPool = null; studyFullCurrentQ = null; studyFullProgression = [];
   studyView = 'results';
   renderApp();
+  prefetchExamImages(answers).then(() => { if (studyView === 'results') renderApp(); });
 
   try {
     const callable = fx.httpsCallable('generate_insights');
@@ -1981,7 +2002,8 @@ async function submitExam() {
     return {
       topic: q.topic || '', skillId: q.skillId || null, skillName: q.skillName || '',
       difficulty: q.difficulty || 'Medium', question: q.question, questionId: q.id || null,
-      sourceImage: q.sourceImage || null, pageNumber: q.pageNumber || null,
+      sourceImage: q.sourceImage || null, croppedImage: q.croppedImage || null,
+      requiresImage: !!q.requiresImage, pageNumber: q.pageNumber || null,
       pageCount: q.pageCount || null, sourceFileName: q.sourceFileName || '',
       givenAnswer: (q.options||[])[givenIdx] ?? '(no answer)',
       correctAnswer: (q.options||[])[q.correctIndex] ?? '',
@@ -2000,6 +2022,7 @@ async function submitExam() {
   studyLastResult = { score, total, sessionId: sessionRef.id, suggestions: null, answers, timeTakenSeconds };
   studyView = 'results';
   renderApp();
+  prefetchExamImages(answers).then(() => { if (studyView === 'results') renderApp(); });
 
   try {
     const callable = fx.httpsCallable('generate_insights');
@@ -2064,6 +2087,7 @@ function renderResultsView() {
           <div style="margin-top:8px;padding:10px 12px;border-radius:8px;background:#fdeaea;border:1px solid #f8c9c9">
             <div style="font-size:.85rem;color:#888">${diffBadge(a.difficulty)} <span style="margin-left:6px">${esc(a.topic)}</span></div>
             <div style="margin-top:4px">${esc(a.question)}</div>
+            ${renderPageReference(a)}
             <div style="margin-top:4px;font-size:.88rem">You answered: <em>${esc(a.givenAnswer)}</em> — Correct: <strong>${esc(a.correctAnswer)}</strong></div>
             ${renderQuestionTrace(a, ai + 1, missed.length)}
           </div>`).join('')}
