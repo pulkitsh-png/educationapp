@@ -967,6 +967,14 @@ var newChapterDraft = { bookId: '', newBookName: '', newBookSubject: '', newBook
 var skillReviewDraft = [];
 var skillReviewChapterId = null;
 var skillReviewBusy = false;
+var FULL_LEVELS = ['Simple', 'Medium', 'Hard', 'Complex'];
+var studyFullPool = null;
+var studyFullProgression = [];
+var studyFullCurrentQ = null;
+var studyFullLevel = 1;
+var studyFullAnswer = undefined;
+var studyFullTarget = 45;
+var studyFullBusy = false;
 
 async function ensureStudyMetaLoaded() {
   if (!studyChildId || studyMetaLoadedFor === studyChildId) return;
@@ -1172,6 +1180,7 @@ function renderStudyTab() {
   ensureStudyMetaLoaded(); // fire-and-forget; re-renders itself once loaded
   switch (studyView) {
     case 'exam':        return renderExamView();
+    case 'fullExam':     return renderFullExamView();
     case 'results':     return renderResultsView();
     case 'bank':        return renderBankView();
     case 'pages':       return renderPagesView();
@@ -1261,10 +1270,13 @@ function renderUploadView() {
           ${[5,10,15,20,25].map(n => `<option value="${n}" ${n===10?'selected':''}>${n}</option>`).join('')}
         </select>
       </label>
-      <button class="btn btn-secondary" onclick="startExamFromBank()">📝 Start Practice Exam</button>
+      <button class="btn btn-secondary" onclick="startExamFromBank()">📝 Quick Practice</button>
       <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise Weak Topics</button>
       <button class="btn btn-secondary" onclick="openStudyBank()">📖 Browse Question Bank</button>
       <button class="btn btn-secondary" onclick="openPageGallery()">🖼️ View Scanned Pages</button>
+    </div>
+    <div style="margin-top:10px">
+      <button class="btn btn-secondary" onclick="startFullLengthTest()" ${studyFullBusy?'disabled':''}>${studyFullBusy ? '⏳ Preparing…' : '🎯 Full-Length Test (45 questions, adaptive)'}</button>
     </div>
   </div>`;
 }
@@ -1514,6 +1526,165 @@ function renderExamView() {
   </div>`;
 }
 
+function startFullLengthTest() {
+  if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+  studyFullBusy = true; renderApp();
+  db.collection('examQuestions').where('childId', '==', studyChildId).get().then(snap => {
+    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (all.length < 10) {
+      studyFullBusy = false; renderApp();
+      showToast(`⚠️ Only ${all.length} question(s) available for a full-length test — upload more pages across a mix of difficulties (aim for 20+) before trying this.`);
+      return;
+    }
+    const pool = { Simple: [], Medium: [], Hard: [], Complex: [] };
+    all.forEach(q => { (pool[q.difficulty] || pool.Medium).push(q); });
+    studyFullPool = pool;
+    studyFullProgression = [];
+    studyFullLevel = 1; // start at Medium
+    studyFullAnswer = undefined;
+    const first = pickNextFullQuestion();
+    studyFullBusy = false;
+    if (!first) { showToast('⚠️ Not enough question variety to start a full-length test.'); renderApp(); return; }
+    studyFullCurrentQ = first;
+    studyView = 'fullExam';
+    renderApp();
+    prefetchExamImages([first]).then(() => { if (studyView === 'fullExam') renderApp(); });
+  }).catch(e => {
+    console.error(e); studyFullBusy = false; showToast('❌ Could not load questions.'); renderApp();
+  });
+}
+
+function pickNextFullQuestion() {
+  const tried = new Set();
+  for (let radius = 0; radius < FULL_LEVELS.length; radius++) {
+    const candidates = radius === 0 ? [studyFullLevel] : [studyFullLevel - radius, studyFullLevel + radius];
+    for (const idx of candidates) {
+      if (idx < 0 || idx >= FULL_LEVELS.length || tried.has(idx)) continue;
+      tried.add(idx);
+      const bucket = studyFullPool[FULL_LEVELS[idx]];
+      if (bucket && bucket.length) {
+        const pickIdx = Math.floor(Math.random() * bucket.length);
+        const q = bucket.splice(pickIdx, 1)[0];
+        studyFullLevel = idx;
+        return q;
+      }
+    }
+  }
+  return null;
+}
+
+function renderFullProgressionTrack(progression) {
+  if (!progression.length) return '';
+  return `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">
+    ${progression.map(p => {
+      const c = DIFF_COLORS[p.difficulty] || DIFF_COLORS.Medium;
+      return `<div title="Q${p.n}: ${esc(p.difficulty)} — ${p.correct ? 'correct' : 'missed'}" style="width:14px;height:14px;border-radius:3px;background:${p.correct ? c.fg : '#fff'};border:2px solid ${c.fg}"></div>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderFullExamView() {
+  const q = studyFullCurrentQ;
+  const n = studyFullProgression.length + 1;
+  const total = studyFullTarget;
+  if (!q) return `<div class="card" style="padding:20px"><p>Preparing…</p></div>`;
+  return `
+  <div class="card" style="padding:20px;max-width:760px">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <h2 style="margin:0">🎯 Full-Length Test</h2>
+      <span style="color:#666;font-size:.9rem">Question ${n} of ${total}</span>
+    </div>
+    <div style="margin:10px 0 14px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
+      <div style="height:100%;background:#d4521a;width:${Math.round(100*(n-1)/total)}%;transition:width .2s"></div>
+    </div>
+    ${renderFullProgressionTrack(studyFullProgression)}
+    <div style="padding:16px;border:1px solid #eee;border-radius:12px">
+      <div style="margin-bottom:10px">${diffBadge(q.difficulty)}</div>
+      ${renderPageReference(q)}
+      <div style="font-weight:600;margin-bottom:10px">${esc(q.question)}</div>
+      ${(q.options||[]).map((opt, oi) => `
+        <label style="display:flex;align-items:center;gap:8px;padding:9px 12px;margin-bottom:6px;border-radius:8px;border:1px solid ${studyFullAnswer===oi?'#3b82f6':'#e5e7eb'};background:${studyFullAnswer===oi?'#eaf2ff':'#fff'};cursor:pointer">
+          <input type="radio" name="fullq" ${studyFullAnswer===oi?'checked':''} onclick="studyFullAnswer=${oi}; renderApp();">
+          <span>${esc(opt)}</span>
+        </label>`).join('')}
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn" onclick="submitFullAnswer()" ${studyFullAnswer===undefined?'disabled':''}>${n>=total ? '✅ Finish Test' : 'Next Question →'}</button>
+      <button class="btn btn-secondary" onclick="if(confirm('End this test early? What was answered so far will still be scored.')) finishFullTest();">End Test Early</button>
+    </div>
+  </div>`;
+}
+
+function submitFullAnswer() {
+  const q = studyFullCurrentQ;
+  if (studyFullAnswer === undefined || !q) return;
+  const correct = studyFullAnswer === q.correctIndex;
+  const difficultyIndex = FULL_LEVELS.indexOf(q.difficulty) >= 0 ? FULL_LEVELS.indexOf(q.difficulty) : 1;
+  studyFullProgression.push({
+    n: studyFullProgression.length + 1,
+    questionId: q.id,
+    topic: q.topic || '',
+    skillId: q.skillId || null,
+    skillName: q.skillName || '',
+    difficulty: q.difficulty || 'Medium',
+    difficultyIndex,
+    question: q.question,
+    givenAnswer: (q.options||[])[studyFullAnswer] ?? '(no answer)',
+    correctAnswer: (q.options||[])[q.correctIndex] ?? '',
+    correct,
+  });
+
+  studyFullLevel = correct ? Math.min(studyFullLevel + 1, FULL_LEVELS.length - 1) : Math.max(studyFullLevel - 1, 0);
+  studyFullAnswer = undefined;
+
+  if (studyFullProgression.length >= studyFullTarget) { finishFullTest(); return; }
+
+  const next = pickNextFullQuestion();
+  if (!next) { finishFullTest(); return; } // pool exhausted -- stop honestly rather than repeat questions
+  studyFullCurrentQ = next;
+  renderApp();
+  prefetchExamImages([next]).then(() => { if (studyView === 'fullExam') renderApp(); });
+}
+
+async function finishFullTest() {
+  const progression = studyFullProgression;
+  const total = progression.length;
+  const score = progression.filter(p => p.correct).length;
+  const weightedEarned = progression.reduce((s, p) => s + (p.correct ? p.difficultyIndex + 1 : 0), 0);
+  const weightedMax = progression.reduce((s, p) => s + (p.difficultyIndex + 1), 0);
+  const weightedScore = weightedMax ? Math.round(100 * weightedEarned / weightedMax) : 0;
+  const highestIndex = progression.reduce((m, p) => p.correct ? Math.max(m, p.difficultyIndex) : m, -1);
+  const highestDifficulty = highestIndex >= 0 ? FULL_LEVELS[highestIndex] : null;
+
+  const answers = progression.map(p => ({
+    topic: p.topic, difficulty: p.difficulty, question: p.question,
+    givenAnswer: p.givenAnswer, correctAnswer: p.correctAnswer, correct: p.correct,
+    skillId: p.skillId, skillName: p.skillName,
+  }));
+
+  const sessionRef = await db.collection('examSessions').add({
+    childId: studyChildId, score, total, answers,
+    testType: 'full',
+    progression: progression.map(p => ({ n: p.n, difficulty: p.difficulty, difficultyIndex: p.difficultyIndex, correct: p.correct, topic: p.topic, skillId: p.skillId })),
+    weightedScore, highestDifficulty,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+  });
+
+  studyLastResult = { score, total, sessionId: sessionRef.id, suggestions: null, answers, testType: 'full', weightedScore, highestDifficulty, progression };
+  studyFullPool = null; studyFullCurrentQ = null; studyFullProgression = [];
+  studyView = 'results';
+  renderApp();
+
+  try {
+    const callable = fx.httpsCallable('generate_insights');
+    const result = await callable({ sessionId: sessionRef.id });
+    studyLastResult.suggestions = result.data.suggestions;
+    renderApp();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 async function submitExam() {
   const answers = studyExamQuestions.map((q, i) => {
     const givenIdx = studyExamAnswers[i];
@@ -1552,9 +1723,45 @@ function renderResultsView() {
   if (!r) return `<p>No results yet.</p>`;
   const pct = r.total ? Math.round(100 * r.score / r.total) : 0;
   const missed = (r.answers || []).filter(a => !a.correct);
+
+  const byTopic = {};
+  (r.answers || []).forEach(a => {
+    const key = a.topic || '(untagged)';
+    byTopic[key] = byTopic[key] || { correct: 0, total: 0 };
+    byTopic[key].total++;
+    if (a.correct) byTopic[key].correct++;
+  });
+  const topicRows = Object.entries(byTopic).sort((a, b) => (a[1].correct / a[1].total) - (b[1].correct / b[1].total));
+
   return `
   <div class="card" style="padding:20px;max-width:720px">
     <h2 style="margin-top:0">🎯 Results: ${r.score}/${r.total} <span style="color:#888;font-weight:400;font-size:1rem">(${pct}%)</span></h2>
+
+    ${r.testType === 'full' ? `
+      <div style="margin:14px 0;padding:14px;background:#fef0eb;border:1px solid #fcd9c8;border-radius:10px">
+        <strong>🎯 Full-Length Test Summary</strong>
+        <div style="margin-top:6px;color:#555">
+          Difficulty-weighted score: <strong>${r.weightedScore}%</strong> — harder questions answered correctly count for more, so this reflects how far Ivaan pushed, not just raw accuracy.
+          ${r.highestDifficulty ? `<br>Highest difficulty answered correctly: ${diffBadge(r.highestDifficulty)}` : ''}
+        </div>
+        <div style="margin-top:10px">
+          <div style="font-size:.8rem;color:#888;margin-bottom:4px">Difficulty progression, question by question:</div>
+          ${renderFullProgressionTrack(r.progression || [])}
+          <div style="font-size:.75rem;color:#aaa">Filled square = correct · outline only = missed · color = that question's difficulty level</div>
+        </div>
+      </div>
+    ` : ''}
+
+    ${topicRows.length > 1 ? `
+      <div style="margin:14px 0">
+        <strong>📊 Performance by topic</strong>
+        ${topicRows.map(([topic, s]) => `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0">
+            <span>${esc(topic)}</span>
+            <span style="color:${s.correct===s.total?'#2d9e52':s.correct===0?'#b91c1c':'#888'};font-weight:600">${s.correct}/${s.total}</span>
+          </div>`).join('')}
+      </div>
+    ` : ''}
 
     ${missed.length ? `
       <div style="margin-top:14px">
