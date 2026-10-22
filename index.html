@@ -1625,7 +1625,8 @@ function watchUploadBatch(batchId, chapterId) {
 
 async function openStudyBank() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
-  const snap = await db.collection('examQuestions').where('childId','==',studyChildId).limit(200).get();
+  if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
+  const snap = await db.collection('examQuestions').where('chapterId','==',studyChapterId).get();
   studyBankQuestions = snap.docs.map(d => ({id:d.id, ...d.data()}));
   studyView = 'bank';
   renderApp();
@@ -1668,10 +1669,11 @@ function renderBankView() {
 
 async function startExamFromBank() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+  if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
   const count = parseInt(document.getElementById('study-exam-count')?.value || '10', 10);
-  const snap = await db.collection('examQuestions').where('childId','==',studyChildId).get();
+  const snap = await db.collection('examQuestions').where('chapterId','==',studyChapterId).get();
   const all = snap.docs.map(d => ({id:d.id, ...d.data()}));
-  if (!all.length) { showToast('⚠️ No questions yet — upload a page first.'); return; }
+  if (!all.length) { showToast('⚠️ No questions yet for this chapter — upload a page first.'); return; }
   const shuffled = all.slice();
   for (let i = shuffled.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]; }
   studyExamQuestions = shuffled.slice(0, count);
@@ -1684,21 +1686,38 @@ async function startExamFromBank() {
 
 async function startRevisionExam() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+  if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
   const count = parseInt(document.getElementById('study-exam-count')?.value || '10', 10);
 
+  const qSnap = await db.collection('examQuestions').where('chapterId','==',studyChapterId).get();
+  const all = qSnap.docs.map(d => ({id:d.id, ...d.data()}));
+  if (!all.length) { showToast('⚠️ No questions yet for this chapter — upload a page first.'); return; }
+
   const sessSnap = await db.collection('examSessions').where('childId','==',studyChildId).limit(30).get();
+  const chapterQuestionIds = new Set(all.map(q => q.id));
   const missedByKey = {};
   sessSnap.docs.forEach(d => {
     (d.data().answers || []).forEach(a => {
       const key = a.skillName || a.topic;
-      if (!a.correct && key) missedByKey[key] = (missedByKey[key] || 0) + 1;
+      // Only count it as "weak" if it belongs to a question in THIS chapter's bank,
+      // so revision for one book never pulls in a weak spot from another.
+      if (!a.correct && key && chapterQuestionIds.has(a.questionId)) missedByKey[key] = (missedByKey[key] || 0) + 1;
     });
   });
-  const weakKeys = Object.keys(missedByKey).sort((a,b) => missedByKey[b]-missedByKey[a]);
+  let weakKeys = Object.keys(missedByKey).sort((a,b) => missedByKey[b]-missedByKey[a]);
+  if (!weakKeys.length) {
+    // Fallback for older sessions saved before answers recorded questionId: match by skill/topic name only,
+    // which is still scoped below because `all` is already this chapter's questions.
+    sessSnap.docs.forEach(d => {
+      (d.data().answers || []).forEach(a => {
+        const key = a.skillName || a.topic;
+        if (!a.correct && key) missedByKey[key] = (missedByKey[key] || 0) + 1;
+      });
+    });
+    weakKeys = Object.keys(missedByKey).sort((a,b) => missedByKey[b]-missedByKey[a]);
+  }
   if (!weakKeys.length) { showToast('No missed questions yet — take a practice exam first, then come back to revise!'); return; }
 
-  const qSnap = await db.collection('examQuestions').where('childId','==',studyChildId).get();
-  const all = qSnap.docs.map(d => ({id:d.id, ...d.data()}));
   const weakSet = new Set(weakKeys);
   const matchesWeak = q => weakSet.has(q.skillName) || weakSet.has(q.topic);
   let pool = all.filter(matchesWeak);
@@ -1753,12 +1772,13 @@ function renderExamView() {
 
 function startFullLengthTest() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+  if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
   studyFullBusy = true; renderApp();
-  db.collection('examQuestions').where('childId', '==', studyChildId).get().then(snap => {
+  db.collection('examQuestions').where('chapterId', '==', studyChapterId).get().then(snap => {
     const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (all.length < 10) {
       studyFullBusy = false; renderApp();
-      showToast(`⚠️ Only ${all.length} question(s) available for a full-length test — upload more pages across a mix of difficulties (aim for 20+) before trying this.`);
+      showToast(`⚠️ Only ${all.length} question(s) available for this chapter's full-length test — upload more pages across a mix of difficulties (aim for 20+) before trying this.`);
       return;
     }
     const pool = { Simple: [], Medium: [], Hard: [], Complex: [] };
@@ -1888,11 +1908,11 @@ async function finishFullTest() {
   const answers = progression.map(p => ({
     topic: p.topic, difficulty: p.difficulty, question: p.question,
     givenAnswer: p.givenAnswer, correctAnswer: p.correctAnswer, correct: p.correct,
-    skillId: p.skillId, skillName: p.skillName,
+    skillId: p.skillId, skillName: p.skillName, questionId: p.questionId || null,
   }));
 
   const sessionRef = await db.collection('examSessions').add({
-    childId: studyChildId, score, total, answers,
+    childId: studyChildId, chapterId: studyChapterId, answers, score, total,
     testType: 'full',
     progression: progression.map(p => ({ n: p.n, difficulty: p.difficulty, difficultyIndex: p.difficultyIndex, correct: p.correct, topic: p.topic, skillId: p.skillId })),
     weightedScore, highestDifficulty, timeTakenSeconds,
@@ -1922,7 +1942,7 @@ async function submitExam() {
     const correct = givenIdx === q.correctIndex;
     return {
       topic: q.topic || '', skillId: q.skillId || null, skillName: q.skillName || '',
-      difficulty: q.difficulty || 'Medium', question: q.question,
+      difficulty: q.difficulty || 'Medium', question: q.question, questionId: q.id || null,
       givenAnswer: (q.options||[])[givenIdx] ?? '(no answer)',
       correctAnswer: (q.options||[])[q.correctIndex] ?? '',
       correct
@@ -1932,7 +1952,7 @@ async function submitExam() {
   const total = answers.length;
 
   const sessionRef = await db.collection('examSessions').add({
-    childId: studyChildId, score, total, answers,
+    childId: studyChildId, chapterId: studyChapterId, score, total, answers,
     timeTakenSeconds,
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
   });
