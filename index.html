@@ -443,10 +443,18 @@ function attachListeners() {
     startPolling();
   });
 
-  const unsub2 = db.collection('children').orderBy('order','asc').onSnapshot(snap => {
-    children = snap.docs.map(d => ({id:d.id,...d.data()}));
-    if (document.getElementById('app')) renderApp();
-  }, err => console.warn('children listener error:', err.code));
+  // A student account can't list the whole children collection (RBAC
+  // rules only let them `get` their own child doc by id) -- so for a
+  // student, watch just that one doc instead of the full collection.
+  const unsub2 = (userProfile?.role === 'student' && userProfile?.studentChildId)
+    ? db.collection('children').doc(userProfile.studentChildId).onSnapshot(snap => {
+        children = snap.exists ? [{id: snap.id, ...snap.data()}] : [];
+        if (document.getElementById('app')) renderApp();
+      }, err => console.warn('child listener error:', err.code))
+    : db.collection('children').orderBy('order','asc').onSnapshot(snap => {
+        children = snap.docs.map(d => ({id:d.id,...d.data()}));
+        if (document.getElementById('app')) renderApp();
+      }, err => console.warn('children listener error:', err.code));
 
   const unsub3 = db.collection('settings').doc('global').onSnapshot(snap => {
     settings = snap.exists ? snap.data() : {};
