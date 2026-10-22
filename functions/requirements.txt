@@ -1,1 +1,4 @@
-firebase_functions~=0.5.0
+firebase-functions
+firebase-admin
+google-genai
+Pillow

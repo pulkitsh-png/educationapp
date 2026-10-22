@@ -2,32 +2,142 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    match /{document=**} {
-      allow read: if request.auth != null;
+    // ── Role helpers ─────────────────────────────────────────────
+    // Real authorization boundary for the whole app. The client's
+    // Parent/Student UI toggle is cosmetic only -- these functions,
+    // backed by the signed-in user's own `users/{uid}` doc, are what
+    // actually grant or deny access.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function isAdmin() {
+      return isSignedIn() && userData().role == 'admin';
+    }
+    function isViewer() {
+      // Legacy non-admin role that predates the student role -- keeps its
+      // existing full-read behavior unchanged so no pre-existing account
+      // loses access it already had.
+      return isSignedIn() && userData().role == 'viewer';
+    }
+    function isStudent() {
+      return isSignedIn() && userData().role == 'student';
+    }
+    function myChildId() {
+      return isStudent() ? userData().studentChildId : null;
+    }
+    // True only for a student account bound to exactly this child --
+    // a student can never read or write another child's data.
+    function ownsChild(childId) {
+      return isStudent() && childId != null && myChildId() == childId;
     }
 
+    // ── Users ────────────────────────────────────────────────────
     match /users/{userId} {
-      allow read, write: if request.auth.uid == userId;
+      // Anyone can read their own profile; admins can read/list everyone's
+      // (needed for the Family Users screen).
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      // Self-signup always starts as 'viewer' -- nobody can hand themself
+      // 'admin' or 'student' this way. Role/studentChildId promotions only
+      // happen through the set_user_role Cloud Function (Admin SDK, which
+      // bypasses these rules and requires an existing admin to call it).
+      allow create: if isSignedIn() && request.auth.uid == userId
+        && request.resource.data.role == 'viewer';
+      allow update: if isSignedIn() && request.auth.uid == userId
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.get('studentChildId', null) == resource.data.get('studentChildId', null);
     }
 
+    // ── Calendar / planner data -- parent-only, not part of Study & Exam ──
     match /events/{id} {
-      allow write: if request.auth != null &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-
-    match /children/{id} {
-      allow write: if request.auth != null &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow read: if isAdmin() || isViewer();
+      allow write: if isAdmin();
     }
 
     match /settings/{id} {
-      allow write: if request.auth != null &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow read: if isAdmin() || isViewer();
+      allow write: if isAdmin();
     }
 
     match /activityTypes/{id} {
-      allow write: if request.auth != null &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow read: if isAdmin() || isViewer();
+      allow write: if isAdmin();
+    }
+
+    // Legacy exam-upload tracking doc (superseded by uploadBatches, kept
+    // readable in case any old client code still references it).
+    match /examUploads/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+      allow create, update: if isAdmin();
+    }
+
+    match /children/{id} {
+      // A student may fetch their OWN child doc directly by id (used instead
+      // of listing the collection), but can never list/browse all children.
+      allow get: if isAdmin() || isViewer() || ownsChild(id);
+      allow list: if isAdmin() || isViewer();
+      allow write: if isAdmin();
+    }
+
+    // ── MVP: Books / Chapters / Skills ──────────────────────────
+    match /books/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+      allow write: if isAdmin();
+    }
+
+    match /chapters/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+      allow create, update: if isAdmin();
+    }
+
+    // Skills are only ever created/retagged server-side (merge_skills /
+    // process_exam_page, via the Admin SDK, which bypasses these rules) --
+    // only a read rule is needed here.
+    match /skills/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+    }
+
+    // Questions are generated server-side only; students/parents read them.
+    match /examQuestions/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+    }
+
+    match /uploadBatches/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+      allow create: if isAdmin();
+    }
+
+    match /examSessions/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+      allow create: if isAdmin() || ownsChild(request.resource.data.childId);
+      allow update: if isAdmin() || ownsChild(resource.data.childId);
+    }
+
+    // ── MVP: Starting-point check-ins & learning sessions ───────
+    match /checkIns/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+      allow create: if isAdmin() || ownsChild(request.resource.data.childId);
+      allow update: if isAdmin() || ownsChild(resource.data.childId);
+    }
+
+    match /learningSessions/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+      allow create: if isAdmin() || ownsChild(request.resource.data.childId);
+      allow update: if isAdmin() || ownsChild(resource.data.childId);
+    }
+
+    match /attempts/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+      allow create: if isAdmin() || ownsChild(request.resource.data.childId);
+      allow update: if isAdmin() || ownsChild(resource.data.childId);
+    }
+
+    match /assignments/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+      allow create, update: if isAdmin();
     }
 
   }

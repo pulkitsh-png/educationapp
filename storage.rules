@@ -1,0 +1,20 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Pages are uploaded under examPages/{childId}/... -- scope reads to an
+    // admin, or a student account bound to that exact child, so one child's
+    // scanned pages are never reachable from another child's account even
+    // via a direct Storage URL (not just hidden by the app UI).
+    match /examPages/{childId}/{allPaths=**} {
+      allow read: if request.auth != null && (
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'student'
+          && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.studentChildId == childId)
+      );
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024
+        && (request.resource.contentType.matches('image/.*') || request.resource.contentType == 'application/pdf')
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+  }
+}
