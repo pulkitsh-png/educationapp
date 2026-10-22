@@ -1690,7 +1690,8 @@ async function submitExam() {
     const givenIdx = studyExamAnswers[i];
     const correct = givenIdx === q.correctIndex;
     return {
-      topic: q.topic || '', difficulty: q.difficulty || 'Medium', question: q.question,
+      topic: q.topic || '', skillId: q.skillId || null, skillName: q.skillName || '',
+      difficulty: q.difficulty || 'Medium', question: q.question,
       givenAnswer: (q.options||[])[givenIdx] ?? '(no answer)',
       correctAnswer: (q.options||[])[q.correctIndex] ?? '',
       correct
@@ -1726,7 +1727,7 @@ function renderResultsView() {
 
   const byTopic = {};
   (r.answers || []).forEach(a => {
-    const key = a.topic || '(untagged)';
+    const key = a.skillName || a.topic || '(untagged)';
     byTopic[key] = byTopic[key] || { correct: 0, total: 0 };
     byTopic[key].total++;
     if (a.correct) byTopic[key].correct++;
@@ -1754,7 +1755,7 @@ function renderResultsView() {
 
     ${topicRows.length > 1 ? `
       <div style="margin:14px 0">
-        <strong>📊 Performance by topic</strong>
+        <strong>📊 Performance by skill</strong>
         ${topicRows.map(([topic, s]) => `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0">
             <span>${esc(topic)}</span>
