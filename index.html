@@ -568,6 +568,7 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 const canEdit = () => userProfile?.role === 'admin';
+const isStudentRole = () => userProfile?.role === 'student';
 
 async function saveEvent(ev) {
   const data = {...ev};
