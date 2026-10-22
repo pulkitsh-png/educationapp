@@ -948,7 +948,8 @@ function renderTabContent(today, wd) {
 // ══════════════════════════════════════════════════════════════
 //  STUDY & EXAM
 // ══════════════════════════════════════════════════════════════
-var studyView = 'upload';
+var studyView = 'home';
+var studyMode = null; // 'parent' | 'student' -- UI-only, never an authorization boundary
 var studyChildId = null;
 var studyExamQuestions = [];
 var studyExamAnswers = {};
@@ -963,10 +964,12 @@ var studyBooks = [];
 var studyChapters = [];
 var studyMetaLoadedFor = null;
 var studyChapterId = null;
+var studyChapterStats = {}; // chapterId -> { totalQuestions, questions, skills, skillsNoQuestions, unconfirmedNames }
 var newChapterDraft = { bookId: '', newBookName: '', newBookSubject: '', newBookType: 'curriculum', title: '', testDate: '' };
-var skillReviewDraft = [];
-var skillReviewChapterId = null;
-var skillReviewBusy = false;
+var studyManageChapterId = null;
+var studyManageGroups = [];
+var studyManageBusy = false;
+var studyQuickSetupOpen = false;
 var FULL_LEVELS = ['Simple', 'Medium', 'Hard', 'Complex'];
 var studyFullPool = null;
 var studyFullProgression = [];
@@ -1006,7 +1009,7 @@ function renderNewChapterView() {
   const creatingNewBook = d.bookId === '__new__';
   return `
   <div class="card" style="padding:20px;max-width:620px">
-    <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">← Back</button>
+    <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">← Back</button>
     <h2>📂 New Chapter</h2>
 
     <div style="margin-top:14px">
@@ -1083,7 +1086,7 @@ async function createChapter() {
     studyChapters.push({ id: chapterRef.id, childId: studyChildId, bookId, title: d.title.trim(), testDate: d.testDate || null, skillSuggestions: [], skillsConfirmed: false });
     studyChapterId = chapterRef.id;
     newChapterDraft = { bookId: '', newBookName: '', newBookSubject: '', newBookType: 'curriculum', title: '', testDate: '' };
-    studyView = 'upload';
+    studyView = 'home';
     showToast('✅ Chapter created.');
   } catch (e) {
     console.error(e); showToast('❌ ' + (e.message || 'Could not create chapter.'));
@@ -1092,53 +1095,139 @@ async function createChapter() {
   }
 }
 
-function openSkillReview(chapterId) {
-  const ch = getStudyChapter(chapterId);
-  if (!ch) return;
-  skillReviewChapterId = chapterId;
-  skillReviewDraft = Array.from(new Set(ch.skillSuggestions || []));
-  studyView = 'skillReview';
+// ── Chapter readiness stats (questions available, skills, gaps) ──────────
+async function loadChapterStats(chapterId) {
+  const [qSnap, skillsSnap] = await Promise.all([
+    db.collection('examQuestions').where('chapterId', '==', chapterId).get(),
+    db.collection('skills').where('chapterId', '==', chapterId).get(),
+  ]);
+  const questions = qSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const skillDocs = skillsSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(s => !s.mergedInto);
+  const countsBySkillId = {};
+  const countsByRawName = {};
+  questions.forEach(q => {
+    if (q.skillId) countsBySkillId[q.skillId] = (countsBySkillId[q.skillId] || 0) + 1;
+    else if (q.skillName) countsByRawName[q.skillName] = (countsByRawName[q.skillName] || 0) + 1;
+  });
+  const skills = skillDocs.map(s => ({ ...s, questionCount: countsBySkillId[s.id] || 0 }));
+  studyChapterStats[chapterId] = {
+    totalQuestions: questions.length,
+    questions,
+    skills,
+    skillsNoQuestions: skills.filter(s => s.questionCount === 0).length,
+    unconfirmedNames: Object.keys(countsByRawName),
+  };
+  renderApp();
+  return studyChapterStats[chapterId];
+}
+
+// ── Skill grouping (string-similarity clustering -- a starting suggestion, ──
+//    never an automatic merge; the parent adjusts before saving) ──────────
+function normalizeSkillTokens(name) {
+  const stop = new Set(['a', 'an', 'the', 'to', 'of', 'by', 'in', 'on', 'and', 'or', 'for', 'with']);
+  return new Set(
+    (name || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t && !stop.has(t))
+  );
+}
+function tokenSimilarity(aTokens, bTokens) {
+  const inter = [...aTokens].filter(t => bTokens.has(t)).length;
+  const union = new Set([...aTokens, ...bTokens]).size;
+  return union ? inter / union : 0;
+}
+function clusterSkillNames(entries) {
+  const groups = [];
+  entries.forEach(entry => {
+    const tokens = normalizeSkillTokens(entry.label);
+    let best = null, bestScore = 0;
+    for (const g of groups) {
+      const score = tokenSimilarity(tokens, g.tokens);
+      if (score > bestScore) { bestScore = score; best = g; }
+    }
+    if (best && bestScore >= 0.5) {
+      best.members.push(entry);
+      best.tokens = new Set([...best.tokens, ...tokens]);
+    } else {
+      groups.push({ tokens, members: [entry], name: entry.label });
+    }
+  });
+  return groups;
+}
+
+async function openManageSkills(chapterId) {
+  let stats = studyChapterStats[chapterId];
+  if (!stats) stats = await loadChapterStats(chapterId);
+  const entries = [
+    ...stats.skills.map(s => ({ key: 's:' + s.id, label: s.name, questionCount: s.questionCount, skillId: s.id })),
+    ...stats.unconfirmedNames.map(n => ({
+      key: 'n:' + n, label: n, skillId: null, rawName: n,
+      questionCount: stats.questions.filter(q => !q.skillId && q.skillName === n).length,
+    })),
+  ];
+  const clusters = clusterSkillNames(entries);
+  studyManageGroups = clusters.map((g, i) => ({ id: 'g' + i, name: g.name, members: g.members }));
+  studyManageChapterId = chapterId;
+  studyView = 'manageSkills';
   renderApp();
 }
 
-function renderSkillReviewView() {
-  const ch = getStudyChapter(skillReviewChapterId);
+function splitSkillMember(gi, mi) {
+  const member = studyManageGroups[gi].members.splice(mi, 1)[0];
+  studyManageGroups.push({ id: 'g' + studyManageGroups.length + '-' + Date.now(), name: member.label, members: [member] });
+  renderApp();
+}
+
+function renderManageSkillsView() {
+  const chapter = getStudyChapter(studyManageChapterId);
   return `
-  <div class="card" style="padding:20px;max-width:620px">
-    <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">← Back</button>
-    <h2>🧩 Suggested Skills${ch ? ` — ${esc(ch.title)}` : ''}</h2>
-    <p style="color:#666">Based on what was uploaded, these look like the skills this chapter covers. Confirm or edit the list before Ivaan starts practicing.</p>
+  <div class="card" style="padding:20px;max-width:760px">
+    <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">← Back</button>
+    <h2>🧩 Manage Skills${chapter ? ` — ${esc(chapter.title)}` : ''}</h2>
+    <p style="color:#666">Grouped by how similar the names are — nothing is merged automatically. Rename a group, split out an item that doesn't belong, then save.</p>
 
-    <div style="margin-top:14px">
-      ${skillReviewDraft.map((s, i) => `
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <input type="text" value="${esc(s)}" style="flex:1;padding:8px;border-radius:8px;border:1px solid #ddd" oninput="skillReviewDraft[${i}]=this.value">
-          <button class="btn btn-secondary btn-sm" onclick="skillReviewDraft.splice(${i},1); renderApp();">✕</button>
-        </div>`).join('') || '<p style="color:#999">No suggestions yet — add skills manually below.</p>'}
-    </div>
+    ${studyManageGroups.map((g, gi) => `
+      <div style="margin-top:14px;padding:14px;border:1px solid #eee;border-radius:10px;${g.members.length > 1 ? 'background:#fff8ea;border-color:#fde3b8' : ''}">
+        <input type="text" value="${esc(g.name)}" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ddd;font-weight:600" oninput="studyManageGroups[${gi}].name=this.value">
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+          ${g.members.map((m, mi) => `
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:.85rem;padding:4px 8px;background:#fff;border-radius:6px;border:1px solid #f0f0f0">
+              <span>${esc(m.label)} <span style="color:#999">(${m.questionCount} question${m.questionCount === 1 ? '' : 's'})</span></span>
+              ${g.members.length > 1 ? `<button class="btn btn-secondary btn-sm" onclick="splitSkillMember(${gi},${mi})">Split out</button>` : ''}
+            </div>`).join('')}
+        </div>
+      </div>`).join('') || '<p style="color:#999;margin-top:14px">Nothing to review — upload some pages first.</p>'}
 
-    <button class="btn btn-secondary" style="margin-top:6px" onclick="skillReviewDraft.push(''); renderApp();">+ Add skill</button>
-
-    <div style="margin-top:18px">
-      <button class="btn" onclick="submitSkillReview()" ${skillReviewBusy?'disabled':''}>${skillReviewBusy ? '⏳ Saving…' : '✅ Confirm Skills'}</button>
-    </div>
+    ${studyManageGroups.length ? `
+      <div style="margin-top:18px">
+        <button class="btn" onclick="saveManagedSkills()" ${studyManageBusy ? 'disabled' : ''}>${studyManageBusy ? '⏳ Saving…' : '✅ Save Groupings'}</button>
+      </div>
+    ` : ''}
   </div>`;
 }
 
-async function submitSkillReview() {
-  const skills = skillReviewDraft.map(s => s.trim()).filter(Boolean);
-  if (!skills.length) { showToast('⚠️ Add at least one skill.'); return; }
-  skillReviewBusy = true; renderApp();
+async function saveManagedSkills() {
+  const groups = studyManageGroups.filter(g => g.members.length && g.name.trim());
+  if (!groups.length) { showToast('⚠️ Nothing to save.'); return; }
+  studyManageBusy = true; renderApp();
   try {
-    const callable = fx.httpsCallable('confirm_chapter_skills');
-    const result = await callable({ chapterId: skillReviewChapterId, skills });
-    await refreshChapter(skillReviewChapterId);
-    showToast(`✅ ${result.data.skillCount} skill(s) confirmed — ${result.data.taggedQuestionCount} question(s) tagged.`);
-    studyView = 'upload';
+    const callable = fx.httpsCallable('merge_skills');
+    const payload = {
+      chapterId: studyManageChapterId,
+      groups: groups.map(g => ({
+        name: g.name.trim(),
+        memberSkillIds: g.members.filter(m => m.skillId).map(m => m.skillId),
+        memberRawNames: g.members.filter(m => !m.skillId).map(m => m.rawName),
+      })),
+    };
+    const result = await callable(payload);
+    delete studyChapterStats[studyManageChapterId];
+    await loadChapterStats(studyManageChapterId);
+    await refreshChapter(studyManageChapterId);
+    showToast(`✅ ${result.data.skillCount} skill(s) saved — ${result.data.taggedQuestionCount} question(s) tagged.`);
+    studyView = 'home';
   } catch (e) {
     console.error(e); showToast('❌ ' + (e.message || 'Could not save skills.'));
   } finally {
-    skillReviewBusy = false; renderApp();
+    studyManageBusy = false; renderApp();
   }
 }
 
@@ -1179,14 +1268,15 @@ function renderStudyTab() {
   if (!studyChildId && children.length) studyChildId = children[0].id;
   ensureStudyMetaLoaded(); // fire-and-forget; re-renders itself once loaded
   switch (studyView) {
-    case 'exam':        return renderExamView();
-    case 'fullExam':     return renderFullExamView();
-    case 'results':     return renderResultsView();
-    case 'bank':        return renderBankView();
-    case 'pages':       return renderPagesView();
-    case 'newChapter':  return renderNewChapterView();
-    case 'skillReview': return renderSkillReviewView();
-    default:            return renderUploadView();
+    case 'exam':         return renderExamView();
+    case 'fullExam':      return renderFullExamView();
+    case 'results':      return renderResultsView();
+    case 'bank':         return renderBankView();
+    case 'pages':        return renderPagesView();
+    case 'newChapter':   return renderNewChapterView();
+    case 'manageSkills': return renderManageSkillsView();
+    case 'upload':       return renderUploadView();
+    default:             return renderChapterHomeView();
   }
 }
 
@@ -1196,62 +1286,161 @@ function childPicker() {
   </select>`;
 }
 
+function toggleQuickSetup() { studyQuickSetupOpen = !studyQuickSetupOpen; renderApp(); }
+
+function renderChapterHomeView() {
+  const childChapters = studyChapters.filter(c => c.childId === studyChildId);
+  if (!studyChapterId || !childChapters.find(c => c.id === studyChapterId)) {
+    studyChapterId = childChapters[0] ? childChapters[0].id : null;
+  }
+  const chapter = getStudyChapter(studyChapterId);
+  const book = chapter ? getStudyBook(chapter.bookId) : null;
+  const isAdmin = canEdit();
+  if (!studyMode) studyMode = isAdmin ? 'parent' : 'student';
+
+  if (chapter && !studyChapterStats[chapter.id]) loadChapterStats(chapter.id); // fire-and-forget
+  const stats = chapter ? studyChapterStats[chapter.id] : null;
+
+  const modeToggle = isAdmin ? `
+    <div style="display:inline-flex;border:1px solid #ddd;border-radius:999px;overflow:hidden">
+      <button onclick="studyMode='parent'; renderApp();" style="padding:6px 14px;border:none;background:${studyMode==='parent'?'#d4521a':'#fff'};color:${studyMode==='parent'?'#fff':'#555'};cursor:pointer;font-size:.82rem">👨‍👩‍👧 Parent</button>
+      <button onclick="studyMode='student'; renderApp();" style="padding:6px 14px;border:none;background:${studyMode==='student'?'#d4521a':'#fff'};color:${studyMode==='student'?'#fff':'#555'};cursor:pointer;font-size:.82rem">🧒 Student</button>
+    </div>` : '';
+
+  const header = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
+      <div>
+        <h2 style="margin:0">${chapter ? esc(chapter.title) : '📚 Study & Exam'}</h2>
+        ${chapter ? `<div style="color:#888;font-size:.88rem;margin-top:2px">${book ? esc(book.title) + ' · ' + esc(book.subject) : ''}${chapter.testDate ? ' · 🗓️ Test: ' + esc(chapter.testDate) : ''}</div>` : ''}
+      </div>
+      ${modeToggle}
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 18px">
+      <label style="font-size:.85rem;color:#666">${childPicker()}</label>
+      ${childChapters.length ? `
+        <select style="padding:6px 8px;border-radius:8px;border:1px solid #ddd" onchange="studyChapterId=this.value; renderApp();">
+          ${childChapters.map(c => `<option value="${c.id}" ${c.id===studyChapterId?'selected':''}>${esc(c.title)}</option>`).join('')}
+        </select>
+      ` : ''}
+      ${isAdmin && studyMode === 'parent' ? `<button class="btn btn-secondary btn-sm" onclick="studyView='newChapter'; renderApp();">+ New Chapter</button>` : ''}
+    </div>`;
+
+  if (!chapter) {
+    return `<div class="card" style="padding:20px;max-width:760px">${header}
+      <p style="color:#888">${isAdmin ? 'No chapters yet — create one and upload some pages to get started.' : 'No chapter has been set up yet — ask a parent to add material.'}</p>
+      ${isAdmin ? `<button class="btn" onclick="studyView='newChapter'; renderApp();">+ New Chapter</button>` : ''}
+    </div>`;
+  }
+
+  return studyMode === 'student'
+    ? `<div class="card" style="padding:20px;max-width:760px">${header}${renderStudentChapterHome(chapter, stats)}</div>`
+    : `<div class="card" style="padding:20px;max-width:900px">${header}${renderParentChapterHome(chapter, stats)}</div>`;
+}
+
+function renderParentChapterHome(chapter, stats) {
+  const batch = studyActiveBatch && studyActiveBatch.chapterId === chapter.id ? studyActiveBatch : null;
+  const processing = batch && batch.totalPages && (batch.processedPages || 0) < batch.totalPages;
+  const unconfirmedCount = stats ? stats.unconfirmedNames.length : 0;
+  const questionsAvailable = stats ? stats.totalQuestions : 0;
+  const skillsConfirmedCount = stats ? stats.skills.length : 0;
+  const skillsNoQuestions = stats ? stats.skillsNoQuestions : 0;
+
+  let primary;
+  if (processing) {
+    primary = `<div style="padding:14px 16px;background:#eef6ff;border:1px solid #cfe3fb;border-radius:10px">
+      ⏳ Processing uploads — ${batch.processedPages || 0} of ${batch.totalPages} page(s) done${batch.questionsGenerated ? `, ${batch.questionsGenerated} questions so far` : ''}.
+    </div>`;
+  } else if (unconfirmedCount > 0) {
+    primary = `<button class="btn" style="font-size:1rem;padding:14px 22px" onclick="openManageSkills('${chapter.id}')">🧩 Review Skills (${unconfirmedCount})</button>`;
+  } else if (!stats) {
+    primary = `<div style="padding:14px 16px;background:#faf8f5;border:1px solid #eee;border-radius:10px;color:#888">Loading chapter status…</div>`;
+  } else if (questionsAvailable === 0) {
+    primary = `<button class="btn" style="font-size:1rem;padding:14px 22px" onclick="studyView='upload'; renderApp();">📷 Upload Pages</button>`;
+  } else {
+    primary = `<button class="btn" style="font-size:1rem;padding:14px 22px" onclick="startExamFromBank()">📝 Start Practice</button>`;
+  }
+
+  return `
+    <div style="margin:14px 0 18px">${primary}</div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #eee">
+      <div><div style="font-size:1.4rem;font-weight:700">${questionsAvailable}</div><div style="font-size:.76rem;color:#888">Questions ready</div></div>
+      <div><div style="font-size:1.4rem;font-weight:700">${skillsConfirmedCount}</div><div style="font-size:.76rem;color:#888">Skills confirmed</div></div>
+      <div><div style="font-size:1.4rem;font-weight:700;color:${skillsNoQuestions ? '#b45309' : 'inherit'}">${skillsNoQuestions}</div><div style="font-size:.76rem;color:#888">Skills without questions</div></div>
+      <div><div style="font-size:1.4rem;font-weight:700;color:${unconfirmedCount ? '#b45309' : 'inherit'}">${unconfirmedCount}</div><div style="font-size:.76rem;color:#888">Suggestions to review</div></div>
+    </div>
+
+    <div style="margin-top:18px">
+      <div style="font-weight:700;color:#555;font-size:.8rem;letter-spacing:.03em;margin-bottom:8px">MATERIALS</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="studyView='upload'; renderApp();">📷 Upload / Processing</button>
+        <button class="btn btn-secondary btn-sm" onclick="openPageGallery()">🖼️ Scanned Pages</button>
+      </div>
+    </div>
+
+    <div style="margin-top:16px">
+      <div style="font-weight:700;color:#555;font-size:.8rem;letter-spacing:.03em;margin-bottom:8px">CHAPTER SKILLS</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="openManageSkills('${chapter.id}')">🧩 Manage Skills${unconfirmedCount ? ` (${unconfirmedCount} new)` : ''}</button>
+        <button class="btn btn-secondary btn-sm" onclick="openStudyBank()">📖 Question Bank</button>
+      </div>
+    </div>
+
+    <div style="margin-top:16px">
+      <div style="font-weight:700;color:#555;font-size:.8rem;letter-spacing:.03em;margin-bottom:8px">LEARNING ACTIVITY</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-secondary btn-sm" onclick="toggleQuickSetup()">📝 Quick Practice</button>
+        ${studyQuickSetupOpen ? `
+          <span style="font-size:.8rem;color:#666">Count:
+            <select id="study-exam-count" style="padding:4px 6px;border-radius:6px;border:1px solid #ddd">
+              ${[5,10,15,20,25].map(n => `<option value="${n}" ${n===10?'selected':''}>${n}</option>`).join('')}
+            </select>
+          </span>
+          <button class="btn btn-sm" onclick="startExamFromBank()">Go</button>
+        ` : ''}
+        <button class="btn btn-secondary btn-sm" onclick="startRevisionExam()">🔁 Revise Weak Skills</button>
+        <button class="btn btn-secondary btn-sm" onclick="startFullLengthTest()" ${studyFullBusy?'disabled':''}>${studyFullBusy ? '⏳ Preparing…' : '🎯 Full-Length Test (45, adaptive)'}</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderStudentChapterHome(chapter, stats) {
+  const questionsAvailable = stats ? stats.totalQuestions : null;
+  if (questionsAvailable === null) return `<p style="color:#888">Loading…</p>`;
+  if (questionsAvailable === 0) return `<p style="color:#888">Nothing to practice yet for this chapter — check back once your parent adds some pages!</p>`;
+  return `
+    <div style="margin:14px 0">
+      <button class="btn" style="font-size:1.05rem;padding:16px 26px" onclick="startExamFromBank()">📝 Practice Now</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise what felt tricky</button>
+      <button class="btn btn-secondary" onclick="startFullLengthTest()" ${studyFullBusy?'disabled':''}>${studyFullBusy ? '⏳ Preparing…' : '🎯 Full-Length Test'}</button>
+    </div>
+  `;
+}
+
 function renderUploadView() {
-  const batch = studyActiveBatch;
+  const chapter = getStudyChapter(studyChapterId);
+  const batch = studyActiveBatch && studyActiveBatch.chapterId === studyChapterId ? studyActiveBatch : null;
   const pct = batch && batch.totalPages ? Math.round(100 * (batch.processedPages || 0) / batch.totalPages) : 0;
   const batchDone = batch && batch.totalPages && (batch.processedPages || 0) >= batch.totalPages;
-  const childChapters = studyChapters.filter(c => c.childId === studyChildId);
-  const selectedChapter = getStudyChapter(studyChapterId);
-  const selectedBook = selectedChapter ? getStudyBook(selectedChapter.bookId) : null;
-  const needsSkillReview = selectedChapter && !selectedChapter.skillsConfirmed && (selectedChapter.skillSuggestions || []).length > 0;
 
   return `
   <div class="card" style="padding:20px;max-width:760px">
-    <h2 style="margin-top:0">📚 Study & Exam</h2>
-    <p style="color:#666">Organize uploads by chapter — AI will generate practice questions from scanned pages and suggest the skills each chapter covers.</p>
+    <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">← Back</button>
+    <h2>📷 Materials${chapter ? ` — ${esc(chapter.title)}` : ''}</h2>
 
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:16px 0">
-      <label>For: ${childPicker()}</label>
-    </div>
-
-    ${canEdit() ? `
-      <div style="margin:16px 0">
-        <label style="font-size:.85rem;color:#666;display:block;margin-bottom:4px">Chapter</label>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-          <select style="padding:8px;border-radius:8px;border:1px solid #ddd;flex:1;min-width:220px" onchange="studyChapterId=this.value||null; renderApp();">
-            <option value="">Choose a chapter…</option>
-            ${childChapters.map(c => {
-              const book = getStudyBook(c.bookId);
-              return `<option value="${c.id}" ${c.id===studyChapterId?'selected':''}>${book ? esc(book.title) + ' — ' : ''}${esc(c.title)}</option>`;
-            }).join('')}
-          </select>
-          <button class="btn btn-secondary" onclick="studyView='newChapter'; renderApp();">+ New Chapter</button>
-        </div>
-        ${selectedChapter ? `
-          <div style="margin-top:8px;color:#888;font-size:.85rem">
-            ${selectedBook ? `📘 ${esc(selectedBook.title)} (${esc(selectedBook.subject)}${selectedBook.bookType==='accelerated'?' · accelerated':''})` : ''}
-            ${selectedChapter.testDate ? ` · 🗓️ Test: ${esc(selectedChapter.testDate)}` : ''}
-          </div>
-        ` : ''}
-      </div>
-
-      ${needsSkillReview ? `
-        <div style="margin:10px 0 16px;padding:12px 16px;background:#fff8ea;border:1px solid #fde3b8;border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <span>🧩 ${selectedChapter.skillSuggestions.length} suggested skill(s) ready for review</span>
-          <button class="btn btn-secondary btn-sm" onclick="openSkillReview('${selectedChapter.id}')">Review Skills</button>
-        </div>
-      ` : ''}
-
+    ${canEdit() ? (chapter ? `
       <input id="study-file-input" type="file" multiple style="display:none" onchange="handleStudyFilesUpload(this)">
-      <button class="btn" onclick="document.getElementById('study-file-input').click()" ${studyBusy || !studyChapterId ?'disabled':''}>
+      <button class="btn" onclick="document.getElementById('study-file-input').click()" ${studyBusy?'disabled':''}>
         ${studyBusy ? '⏳ Uploading…' : '📷 Upload Pages & Generate Questions'}
       </button>
-      ${!studyChapterId ? `<span style="color:#aaa;font-size:.82rem;margin-left:8px">Pick or create a chapter first</span>` : ''}
-    ` : `<p style="color:#999">Only an admin can upload new pages.</p>`}
+    ` : `<p style="color:#999">Pick a chapter from the home screen first.</p>`) : `<p style="color:#999">Only an admin can upload new pages.</p>`}
 
     ${batch ? `
       <div style="margin-top:20px;padding:16px;background:${batchDone ? '#f0faf3' : '#eef6ff'};border-radius:10px;border:1px solid ${batchDone ? '#c9ecd6' : '#cfe3fb'}">
-        <strong>${batchDone ? '✅' : '⏳'} ${batch.chapter ? esc(batch.chapter) + ' — ' : ''}${batchDone ? 'Done' : 'Generating questions in the background…'}</strong>
+        <strong>${batchDone ? '✅ Done' : '⏳ Generating questions in the background…'}</strong>
         <div style="margin-top:6px;color:#555">
           ${batch.processedPages || 0} of ${batch.totalPages} page(s) processed
           ${batch.failedPages ? ` — ${batch.failedPages} failed` : ''}
@@ -1264,19 +1453,8 @@ function renderUploadView() {
       </div>
     ` : ''}
 
-    <div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <label style="font-size:.85rem;color:#666">Questions per test:
-        <select id="study-exam-count" style="padding:6px 8px;border-radius:8px;border:1px solid #ddd;margin-left:4px">
-          ${[5,10,15,20,25].map(n => `<option value="${n}" ${n===10?'selected':''}>${n}</option>`).join('')}
-        </select>
-      </label>
-      <button class="btn btn-secondary" onclick="startExamFromBank()">📝 Quick Practice</button>
-      <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise Weak Topics</button>
-      <button class="btn btn-secondary" onclick="openStudyBank()">📖 Browse Question Bank</button>
-      <button class="btn btn-secondary" onclick="openPageGallery()">🖼️ View Scanned Pages</button>
-    </div>
-    <div style="margin-top:10px">
-      <button class="btn btn-secondary" onclick="startFullLengthTest()" ${studyFullBusy?'disabled':''}>${studyFullBusy ? '⏳ Preparing…' : '🎯 Full-Length Test (45 questions, adaptive)'}</button>
+    <div style="margin-top:20px">
+      <button class="btn btn-secondary btn-sm" onclick="openPageGallery()">🖼️ View Scanned Pages</button>
     </div>
   </div>`;
 }
@@ -1304,7 +1482,7 @@ async function openPageGallery() {
 function renderPagesView() {
   return `
   <div class="card" style="padding:20px;max-width:960px">
-    <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">← Back</button>
+    <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">← Back</button>
     <h2>🖼️ Scanned Pages <span style="font-weight:400;color:#888;font-size:1rem">(${studyPages.length})</span></h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:16px">
       ${studyPages.map(p => {
@@ -1422,7 +1600,7 @@ function renderBankView() {
 
   return `
   <div class="card" style="padding:20px;max-width:960px">
-    <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">← Back</button>
+    <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">← Back</button>
     <h2>📖 Question Bank <span style="font-weight:400;color:#888;font-size:1rem">(${studyBankQuestions.length} questions)</span></h2>
 
     ${Object.keys(byChapter).length > 1 || (Object.keys(byChapter)[0] && byChapter[Object.keys(byChapter)[0]].length < studyBankQuestions.length) ? `
@@ -1466,21 +1644,23 @@ async function startRevisionExam() {
   const count = parseInt(document.getElementById('study-exam-count')?.value || '10', 10);
 
   const sessSnap = await db.collection('examSessions').where('childId','==',studyChildId).limit(30).get();
-  const missedByTopic = {};
+  const missedByKey = {};
   sessSnap.docs.forEach(d => {
     (d.data().answers || []).forEach(a => {
-      if (!a.correct && a.topic) missedByTopic[a.topic] = (missedByTopic[a.topic] || 0) + 1;
+      const key = a.skillName || a.topic;
+      if (!a.correct && key) missedByKey[key] = (missedByKey[key] || 0) + 1;
     });
   });
-  const weakTopics = Object.keys(missedByTopic).sort((a,b) => missedByTopic[b]-missedByTopic[a]);
-  if (!weakTopics.length) { showToast('No missed questions yet — take a practice exam first, then come back to revise!'); return; }
+  const weakKeys = Object.keys(missedByKey).sort((a,b) => missedByKey[b]-missedByKey[a]);
+  if (!weakKeys.length) { showToast('No missed questions yet — take a practice exam first, then come back to revise!'); return; }
 
   const qSnap = await db.collection('examQuestions').where('childId','==',studyChildId).get();
   const all = qSnap.docs.map(d => ({id:d.id, ...d.data()}));
-  const weakSet = new Set(weakTopics);
-  let pool = all.filter(q => weakSet.has(q.topic));
+  const weakSet = new Set(weakKeys);
+  const matchesWeak = q => weakSet.has(q.skillName) || weakSet.has(q.topic);
+  let pool = all.filter(matchesWeak);
   if (pool.length < count) {
-    const rest = all.filter(q => !weakSet.has(q.topic));
+    const rest = all.filter(q => !matchesWeak(q));
     for (let i = rest.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [rest[i],rest[j]]=[rest[j],rest[i]]; }
     pool = pool.concat(rest.slice(0, count - pool.length));
   }
@@ -1489,7 +1669,7 @@ async function startRevisionExam() {
   studyExamAnswers = {};
   await prefetchExamImages(studyExamQuestions);
   studyView = 'exam';
-  showToast(`🔁 Revision exam focused on: ${weakTopics.slice(0,3).join(', ')}${weakTopics.length>3?'…':''}`);
+  showToast(`🔁 Revision focused on: ${weakKeys.slice(0,3).join(', ')}${weakKeys.length>3?'…':''}`);
   renderApp();
 }
 
@@ -1521,7 +1701,7 @@ function renderExamView() {
       </div>`).join('')}
     <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn" onclick="submitExam()">✅ Submit Exam</button>
-      <button class="btn btn-secondary" onclick="studyView='upload'; renderApp();">Cancel</button>
+      <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">Cancel</button>
     </div>
   </div>`;
 }
@@ -1784,8 +1964,8 @@ function renderResultsView() {
     ` : `<p style="color:#888;margin-top:14px">⏳ Generating improvement suggestions…</p>`}
 
     <div style="display:flex;gap:10px;margin-top:18px">
-      <button class="btn" onclick="studyView='upload'; renderApp();">Done</button>
-      <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise These Topics</button>
+      <button class="btn" onclick="studyView='home'; renderApp();">Done</button>
+      <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise These Skills</button>
     </div>
   </div>`;
 }
