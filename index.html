@@ -1235,40 +1235,201 @@ function renderNotificationsTab() {
 }
 
 // ─── USERS ───────────────────────────────────────────────────
+var familyUsers = [];
+var familyUsersLoadedFor = null; // 'pending' | 'done' -- admin-only list, not keyed by child
+
+function loadFamilyUsers() {
+  if (familyUsersLoadedFor) return; // already loading or loaded
+  familyUsersLoadedFor = 'pending';
+  db.collection('users').get().then(snap => {
+    familyUsers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    familyUsersLoadedFor = 'done';
+    if (document.getElementById('app')) renderApp();
+  }).catch(err => {
+    familyUsersLoadedFor = null; // allow retry
+    console.warn('loadFamilyUsers failed:', err.code);
+    if (document.getElementById('app')) renderApp();
+  });
+}
+
+function roleBadge(role) {
+  const map = {
+    admin:   { bg: '#fff3ea', fg: 'var(--accent)', label: 'Admin' },
+    student: { bg: '#eaf2ff', fg: '#1d4ed8', label: 'Student' },
+    viewer:  { bg: '#f0f9f4', fg: '#16a34a', label: 'Viewer' },
+  };
+  const c = map[role] || map.viewer;
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:.72rem;font-weight:700;background:${c.bg};color:${c.fg}">${c.label}</span>`;
+}
+
 function renderUsersTab() {
+  loadFamilyUsers(); // fire-and-forget; re-renders itself once loaded
+
+  const rows = familyUsers.map(u => {
+    const isSelf = currentUser && u.id === currentUser.uid;
+    const linkedChild = u.role === 'student' && u.studentChildId ? children.find(c => c.id === u.studentChildId) : null;
+    return `
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700">${esc(u.name || u.email || u.id)}${isSelf ? ' <span style="font-weight:400;color:var(--muted);font-size:.8rem">(you)</span>' : ''}</div>
+          <div style="font-size:.8rem;color:var(--muted)">${esc(u.email || '')}${linkedChild ? ' · linked to ' + esc(linkedChild.name) : ''}</div>
+        </div>
+        ${roleBadge(u.role)}
+        ${isSelf ? '' : `<button class="btn btn-secondary btn-sm" onclick="openChangeRoleForm('${u.id}')">Change Role</button>`}
+      </div>`;
+  }).join('');
+
   return `
     <div class="page-hd">
-      <div><div class="page-title">Family Users</div><div class="page-sub">Managed via Firebase Authentication</div></div>
+      <div><div class="page-title">Family Users</div><div class="page-sub">Who can sign in, and what they can see</div></div>
+      <button class="btn btn-primary" onclick="openAddFamilyUserForm()">＋ Add Family Member</button>
     </div>
     <div class="settings-card">
-      <h3>👥 How user management works</h3>
-      <div class="info-box green">
-        <strong>✅ Firebase Auth handles all login security</strong><br>
-        Passwords are encrypted by Google — never visible to anyone, including you.
-        Password resets go directly to the user's email.
-      </div>
-      <div class="info-box blue">
-        <strong>To add a family member:</strong><br>
-        1. They sign up using the "Join Family" tab on the login screen, OR<br>
-        2. You add them in <a href="https://console.firebase.google.com" target="_blank">Firebase Console → Authentication → Add user</a><br><br>
-        <strong>To make them an admin:</strong><br>
-        Firebase Console → Firestore → users → find their doc → set <code>role</code> field to <code>"admin"</code>
-      </div>
-      <div class="info-box orange">
-        <strong>To remove a user:</strong><br>
-        Firebase Console → Authentication → find user → Delete.<br>
-        Their profile doc in Firestore → users can also be deleted.
-      </div>
+      <h3>👥 Members</h3>
+      ${familyUsersLoadedFor === 'done'
+        ? (rows || '<p style="color:var(--muted)">No users yet.</p>')
+        : '<p style="color:var(--muted)">Loading…</p>'}
     </div>
     <div class="settings-card">
-      <h3>🔒 Security model</h3>
+      <h3>🔒 How roles work</h3>
       <div style="font-size:.83rem;color:var(--text2);line-height:1.8">
-        <strong>admin</strong> — can add, edit, delete all events, children, settings<br>
+        <strong>admin</strong> — full access: calendar, children, settings, Study &amp; Exam for every child, and this page<br>
+        <strong>student</strong> — locked to their own linked child's Study &amp; Exam only; can't see anyone else's data<br>
         <strong>viewer</strong> — read-only access to the full calendar<br><br>
-        Roles are enforced both in the UI and in Firestore Security Rules,
-        so even a tech-savvy viewer cannot write data by bypassing the app.
+        Roles are enforced both in the UI and in Firestore Security Rules, so even a
+        tech-savvy student or viewer can't reach data outside their role by bypassing the app.
       </div>
     </div>`;
+}
+
+function familyUserChildOptions(selectedId) {
+  return children.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${c.avatar || ''} ${esc(c.name)}</option>`).join('');
+}
+
+function toggleFamilyUserChildField(selectId, fieldId) {
+  const role = document.getElementById(selectId).value;
+  const field = document.getElementById(fieldId);
+  if (field) field.style.display = role === 'student' ? '' : 'none';
+}
+
+function generatePassword(inputId) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  let pw = '';
+  for (let i = 0; i < 12; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+  const el = document.getElementById(inputId);
+  if (el) { el.value = pw; el.type = 'text'; }
+}
+
+function openAddFamilyUserForm() {
+  showModal(`
+    <div class="modal-hd">
+      <div class="modal-title">Add Family Member</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" id="fu-name" placeholder="Their name"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input class="form-input" id="fu-email" type="email" placeholder="them@example.com"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password</label>
+      <div style="display:flex;gap:8px">
+        <input class="form-input" id="fu-password" type="text" placeholder="8+ characters" style="flex:1"/>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="generatePassword('fu-password')">Generate</button>
+      </div>
+      <div style="font-size:.76rem;color:var(--muted);margin-top:4px">You'll need to share this with them yourself — write it down before saving.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Role</label>
+      <select class="form-input" id="fu-role" onchange="toggleFamilyUserChildField('fu-role','fu-child-group')">
+        <option value="viewer">Viewer — read-only calendar</option>
+        <option value="student">Student — their own Study &amp; Exam only</option>
+        <option value="admin">Admin — full access</option>
+      </select>
+    </div>
+    <div class="form-group" id="fu-child-group" style="display:none">
+      <label class="form-label">Linked child</label>
+      <select class="form-input" id="fu-child">${familyUserChildOptions(null)}</select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="fu-submit-btn" onclick="submitAddFamilyUser()">Create Account</button>
+    </div>`);
+}
+
+async function submitAddFamilyUser() {
+  const name = document.getElementById('fu-name').value.trim();
+  const email = document.getElementById('fu-email').value.trim();
+  const password = document.getElementById('fu-password').value;
+  const role = document.getElementById('fu-role').value;
+  const studentChildId = role === 'student' ? document.getElementById('fu-child').value : null;
+
+  if (!email || !email.includes('@')) { showToast('⚠️ Enter a valid email.'); return; }
+  if (!password || password.length < 8) { showToast('⚠️ Password must be 8+ characters.'); return; }
+  if (role === 'student' && !studentChildId) { showToast('⚠️ Pick which child this student is.'); return; }
+
+  const btn = document.getElementById('fu-submit-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  try {
+    const callable = fx.httpsCallable('create_family_user');
+    await callable({ email, password, displayName: name, role, studentChildId });
+    closeModal();
+    showToast(`✅ Account created for ${email}.`);
+    familyUsersLoadedFor = null; // force a refresh
+    loadFamilyUsers();
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Could not create that account.'));
+    if (btn) { btn.disabled = false; btn.textContent = 'Create Account'; }
+  }
+}
+
+function openChangeRoleForm(uid) {
+  const u = familyUsers.find(x => x.id === uid);
+  if (!u) return;
+  showModal(`
+    <div class="modal-hd">
+      <div class="modal-title">Change Role — ${esc(u.name || u.email)}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Role</label>
+      <select class="form-input" id="cr-role" onchange="toggleFamilyUserChildField('cr-role','cr-child-group')">
+        <option value="viewer" ${u.role==='viewer'?'selected':''}>Viewer — read-only calendar</option>
+        <option value="student" ${u.role==='student'?'selected':''}>Student — their own Study &amp; Exam only</option>
+        <option value="admin" ${u.role==='admin'?'selected':''}>Admin — full access</option>
+      </select>
+    </div>
+    <div class="form-group" id="cr-child-group" style="display:${u.role==='student'?'':'none'}">
+      <label class="form-label">Linked child</label>
+      <select class="form-input" id="cr-child">${familyUserChildOptions(u.studentChildId)}</select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="cr-submit-btn" onclick="submitChangeRole('${uid}')">Save</button>
+    </div>`);
+}
+
+async function submitChangeRole(uid) {
+  const role = document.getElementById('cr-role').value;
+  const studentChildId = role === 'student' ? document.getElementById('cr-child').value : null;
+  if (role === 'student' && !studentChildId) { showToast('⚠️ Pick which child this student is.'); return; }
+
+  const btn = document.getElementById('cr-submit-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const callable = fx.httpsCallable('set_user_role');
+    await callable({ uid, role, studentChildId });
+    closeModal();
+    showToast('✅ Role updated.');
+    familyUsersLoadedFor = null;
+    loadFamilyUsers();
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Could not update that role.'));
+    if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+  }
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────

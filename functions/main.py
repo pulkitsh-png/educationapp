@@ -6,7 +6,7 @@ import time
 from firebase_functions import https_fn, storage_fn, options
 from firebase_functions.params import SecretParam
 import firebase_admin
-from firebase_admin import firestore, storage
+from firebase_admin import auth, firestore, storage
 from google import genai
 from google.genai import types
 from PIL import Image
@@ -525,6 +525,65 @@ def set_user_role(req: https_fn.CallableRequest):
         user_ref.update({"role": role, "studentChildId": firestore.DELETE_FIELD})
 
     return {"ok": True}
+
+
+@https_fn.on_call(timeout_sec=30)
+def create_family_user(req: https_fn.CallableRequest):
+    """Admin-only: creates a brand-new login (Firebase Auth account) for a
+    family member and sets their role in one step, instead of needing the
+    Firebase Console or a one-off script. For role='student' this also
+    binds the new account to exactly one child, exactly like set_user_role.
+
+    data: { email, password, displayName, role: 'admin'|'student'|'viewer', studentChildId? }
+    """
+    db = get_db()
+    _require_admin(db, req)
+
+    email = (req.data.get("email") or "").strip()
+    password = req.data.get("password") or ""
+    display_name = (req.data.get("displayName") or "").strip()
+    role = req.data.get("role")
+    student_child_id = req.data.get("studentChildId")
+
+    if not email or "@" not in email:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, "A valid email is required.")
+    if not password or len(password) < 8:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, "Password must be 8+ characters.")
+    if role not in VALID_ROLES:
+        raise https_fn.HttpsError(
+            https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            f"role must be one of: {', '.join(sorted(VALID_ROLES))}.",
+        )
+    if role == "student":
+        if not student_child_id:
+            raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, "studentChildId is required when role is 'student'.")
+        if not db.collection("children").document(student_child_id).get().exists:
+            raise https_fn.HttpsError(https_fn.FunctionsErrorCode.NOT_FOUND, "That child was not found.")
+
+    try:
+        user_record = auth.create_user(
+            email=email,
+            password=password,
+            display_name=display_name or email.split("@")[0],
+            email_verified=False,
+        )
+    except auth.EmailAlreadyExistsError:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.ALREADY_EXISTS, "An account with that email already exists.")
+    except (auth.InvalidPasswordError, ValueError) as e:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, str(e))
+
+    profile = {
+        "name": display_name or email.split("@")[0],
+        "email": email,
+        "role": role,
+        "createdAt": firestore.SERVER_TIMESTAMP,
+        "createdBy": req.auth.uid,
+    }
+    if role == "student":
+        profile["studentChildId"] = student_child_id
+    db.collection("users").document(user_record.uid).set(profile)
+
+    return {"ok": True, "uid": user_record.uid}
 
 
 @https_fn.on_call(secrets=[GEMINI_API_KEY], timeout_sec=60)
