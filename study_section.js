@@ -21,6 +21,24 @@ var studyChapters = [];
 var studyMetaLoadedFor = null;
 var studyChapterId = null;
 var studyChapterStats = {}; // chapterId -> { totalQuestions, questions, skills, skillsNoQuestions, unconfirmedNames }
+var studyQuestionsCache = { childId: null, promise: null }; // in-flight/resolved fetch of this child's full question bank
+
+// Every screen that needs "all of this child's exam questions" shares one
+// fetch instead of each re-querying Firestore independently -- picking a
+// topic used to trigger up to 6 separate full-collection reads. Caches the
+// in-flight promise too, so concurrent callers (e.g. loadChapterStats and
+// openStudyBank firing close together) share one network request.
+function getCachedExamQuestions(forceRefresh) {
+  if (forceRefresh || studyQuestionsCache.childId !== studyChildId) {
+    studyQuestionsCache = {
+      childId: studyChildId,
+      promise: db.collection('examQuestions').where('childId', '==', studyChildId).get()
+        .then(snap => snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+    };
+  }
+  return studyQuestionsCache.promise;
+}
+function invalidateExamQuestionsCache() { studyQuestionsCache = { childId: null, promise: null }; }
 var newChapterDraft = { bookId: '', newBookName: '', newBookSubject: '', newBookType: 'curriculum', title: '', testDate: '' };
 var studyManageChapterId = null;
 var studyManageGroups = [];
@@ -189,11 +207,11 @@ async function loadChapterStats(chapterId) {
   // Queried by childId (not chapterId) and filtered to this chapter in JS --
   // keeps the Firestore security rule provable as "childId == my student's
   // childId" for a student account, without needing a get()-indirection rule.
-  const [qSnap, skillsSnap] = await Promise.all([
-    db.collection('examQuestions').where('childId', '==', studyChildId).get(),
+  const [allQuestions, skillsSnap] = await Promise.all([
+    getCachedExamQuestions(),
     db.collection('skills').where('childId', '==', studyChildId).get(),
   ]);
-  const questions = qSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(q => q.chapterId === chapterId);
+  const questions = allQuestions.filter(q => q.chapterId === chapterId);
   const skillDocs = skillsSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(s => !s.mergedInto && s.chapterId === chapterId);
   const countsBySkillId = {};
   const countsByRawName = {};
@@ -596,10 +614,9 @@ function renderUploadView() {
 
 async function openPageGallery() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
-  const snap = await db.collection('examQuestions').where('childId','==',studyChildId).get();
+  const allQuestions = await getCachedExamQuestions();
   const seen = {};
-  snap.docs.forEach(d => {
-    const q = d.data();
+  allQuestions.forEach(q => {
     if (!q.sourceImage || seen[q.sourceImage]) return;
     seen[q.sourceImage] = { path: q.sourceImage, topic: q.topic, chapter: q.chapter, subject: q.subject, url: null };
   });
@@ -717,6 +734,7 @@ function watchUploadBatch(batchId, chapterId) {
     const nowDone = b && b.totalPages && (b.processedPages || 0) >= b.totalPages;
     if (nowDone && !wasDone && (chapterId || (b && b.chapterId))) {
       wasDone = true;
+      invalidateExamQuestionsCache();
       refreshChapter(chapterId || b.chapterId);
     }
     if (document.getElementById('app')) renderApp();
@@ -726,8 +744,8 @@ function watchUploadBatch(batchId, chapterId) {
 async function openStudyBank() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
   if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
-  const snap = await db.collection('examQuestions').where('childId','==',studyChildId).get();
-  studyBankQuestions = snap.docs.map(d => ({id:d.id, ...d.data()})).filter(q => q.chapterId === studyChapterId);
+  const allQuestions = await getCachedExamQuestions();
+  studyBankQuestions = allQuestions.filter(q => q.chapterId === studyChapterId);
   studyView = 'bank';
   renderApp();
   prefetchExamImages(studyBankQuestions).then(() => { if (studyView === 'bank') renderApp(); });
@@ -774,8 +792,8 @@ async function startExamFromBank() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
   if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
   const count = parseInt(document.getElementById('study-exam-count')?.value || '10', 10);
-  const snap = await db.collection('examQuestions').where('childId','==',studyChildId).get();
-  const all = snap.docs.map(d => ({id:d.id, ...d.data()})).filter(q => q.chapterId === studyChapterId);
+  const allQuestions = await getCachedExamQuestions();
+  const all = allQuestions.filter(q => q.chapterId === studyChapterId);
   if (!all.length) { showToast('⚠️ No questions yet for this chapter — upload a page first.'); return; }
   const shuffled = all.slice();
   for (let i = shuffled.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]; }
@@ -792,8 +810,8 @@ async function startRevisionExam() {
   if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
   const count = parseInt(document.getElementById('study-exam-count')?.value || '10', 10);
 
-  const qSnap = await db.collection('examQuestions').where('childId','==',studyChildId).get();
-  const all = qSnap.docs.map(d => ({id:d.id, ...d.data()})).filter(q => q.chapterId === studyChapterId);
+  const allQuestions = await getCachedExamQuestions();
+  const all = allQuestions.filter(q => q.chapterId === studyChapterId);
   if (!all.length) { showToast('⚠️ No questions yet for this chapter — upload a page first.'); return; }
 
   const sessSnap = await db.collection('examSessions').where('childId','==',studyChildId).limit(30).get();
@@ -878,8 +896,8 @@ function startFullLengthTest() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
   if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
   studyFullBusy = true; renderApp();
-  db.collection('examQuestions').where('childId', '==', studyChildId).get().then(snap => {
-    const all = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(q => q.chapterId === studyChapterId);
+  getCachedExamQuestions().then(allQuestions => {
+    const all = allQuestions.filter(q => q.chapterId === studyChapterId);
     if (all.length < 10) {
       studyFullBusy = false; renderApp();
       showToast(`⚠️ Only ${all.length} question(s) available for this chapter's full-length test — upload more pages across a mix of difficulties (aim for 20+) before trying this.`);
