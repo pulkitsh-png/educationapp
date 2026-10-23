@@ -143,7 +143,7 @@ def main():
     if not gemini_key:
         sys.exit('ERROR: GEMINI_API_KEY is not set.\n  $env:GEMINI_API_KEY = "<your Gemini API key>"')
 
-    firebase_admin.initialize_app()
+    firebase_admin.initialize_app(options={"storageBucket": "kidsplanner-564e3.firebasestorage.app"})
     db = firestore.client()
     bucket = storage.bucket()
     client = genai.Client(api_key=gemini_key)
@@ -240,6 +240,7 @@ def main():
 
         batch.commit()
         print(f"  Updated {ops} question(s); {sum(1 for d in decisions if d.get('requiresImage'))} need an image.")
+        time.sleep(2)  # space requests out a bit to go easier on the rate limit
 
     print("\n" + "=" * 50)
     if args.dry_run:

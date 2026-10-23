@@ -177,6 +177,7 @@ def process_exam_page(event: storage_fn.CloudEvent) -> None:
     page_index = metadata.get("pageIndex")
     page_count = metadata.get("pageCount")
     source_file_name = metadata.get("fileName", "")
+    mode = metadata.get("mode") or "generate"  # 'generate' (default) or 'transcribe'
 
     db = get_db()
 
@@ -214,7 +215,30 @@ def process_exam_page(event: storage_fn.CloudEvent) -> None:
                 + "\n".join(f"- {n}" for n in existing_skill_names)
             )
 
-        prompt = f"""You are helping a parent create practice questions from a scanned textbook page (a single image, or a PDF that may contain one or more scanned pages) for their 5th grader{f' (subject: {subject_hint})' if subject_hint else ''}{f', part of {chapter}' if chapter else ''}.
+        if mode == "transcribe":
+            prompt = f"""You are digitizing an existing multiple-choice practice test page (e.g. a CML test) for a parent's 5th grader, so their child can review these EXACT problems in the app{f', part of {chapter}' if chapter else ''}. Do NOT invent new questions and do NOT rephrase or paraphrase -- transcribe each question and its answer options as printed, as faithfully as you can read them.
+
+Read all the content provided (this may include an answer key, either right after each question, in a margin, or in a separate answer-key section elsewhere on the page(s) you were given) then transcribe EVERY multiple-choice question on the page.
+
+For each transcribed question, also determine:
+- "correctIndex": the 0-based index of the correct option, ONLY if the correct answer is identifiable somewhere in what you were given. If you cannot find or confidently determine it, set this to null -- never guess.
+- "explanation": one brief sentence on why that answer is correct, only if you're confident in it; leave it as an empty string otherwise -- never invent a shaky justification.
+- "difficulty": classify (don't invent) how hard this existing question is -- "Simple" (direct recall), "Medium" (connecting two facts), "Hard" (applying or explaining why), or "Complex" (reasoning across multiple ideas).
+- "requiresImage": true only if the question genuinely cannot be answered from text alone -- e.g. "label the diagram", "what does the chart show". Set it false for ordinary questions, even if the page happens to contain a picture somewhere.
+- "imageRegion": ONLY when requiresImage is true -- the bounding box of the SPECIFIC diagram/chart/picture this question refers to (not the whole page), as {{"yMin":0,"xMin":0,"yMax":1000,"xMax":1000}} on a 0-1000 normalized scale where (0,0) is the page's top-left corner and (1000,1000) is its bottom-right corner. When requiresImage is false, set imageRegion to null.
+- "pdfPageIndex": ONLY relevant when the source file is a PDF and requiresImage is true -- the 0-based index of the PDF page the imageRegion box is on (0 = first page). Otherwise null.
+- "skillName": a short, concrete, learnable skill phrase this question practices -- e.g. "Multiply multi-digit whole numbers". Use the SAME skillName text for different questions that practice the same skill.{skill_vocab_block}
+
+Return ONLY valid JSON, no markdown fences, no commentary:
+{{
+  "topic": "short topic name",
+  "subject": "Science | Math | English | Social Studies | Other",
+  "questions": [
+    {{ "difficulty": "Simple", "question": "...", "options": ["...","...","...","..."], "correctIndex": 0, "explanation": "one sentence", "requiresImage": false, "imageRegion": null, "pdfPageIndex": null, "skillName": "..." }}
+  ]
+}}"""
+        else:
+            prompt = f"""You are helping a parent create practice questions from a scanned textbook page (a single image, or a PDF that may contain one or more scanned pages) for their 5th grader{f' (subject: {subject_hint})' if subject_hint else ''}{f', part of {chapter}' if chapter else ''}.
 
 Read all the content provided, then write exactly 8 multiple-choice questions testing understanding of it: 2 "Simple" (direct recall), 2 "Medium" (connecting two facts), 2 "Hard" (applying or explaining why), 2 "Complex" (reasoning across multiple ideas).
 
@@ -254,6 +278,15 @@ Return ONLY valid JSON, no markdown fences, no commentary:
             if skill_name:
                 skill_names.add(skill_name)
 
+            # Validate correctIndex against the options list -- a bad/missing
+            # index (common in transcribe mode, where Gemini is told not to
+            # guess) must never silently become a wrong "correct" answer.
+            options = q.get("options") or []
+            correct_index = q.get("correctIndex")
+            if not isinstance(correct_index, int) or not (0 <= correct_index < len(options)):
+                correct_index = None
+            needs_answer_key = mode == "transcribe" and correct_index is None
+
             # If this question points at a specific figure, crop just that
             # region out of the page and store it alongside the question --
             # so the question can show the actual picture inline instead of
@@ -281,8 +314,8 @@ Return ONLY valid JSON, no markdown fences, no commentary:
                 "bookId": book_id,
                 "difficulty": q.get("difficulty") if q.get("difficulty") in DIFFICULTIES else "Medium",
                 "question": q.get("question"),
-                "options": q.get("options"),
-                "correctIndex": q.get("correctIndex"),
+                "options": options,
+                "correctIndex": correct_index,
                 "explanation": q.get("explanation", ""),
                 "requiresImage": bool(q.get("requiresImage", False)),
                 "skillName": skill_name,
@@ -292,7 +325,8 @@ Return ONLY valid JSON, no markdown fences, no commentary:
                 "pageNumber": int(page_index) if page_index and page_index.isdigit() else None,
                 "pageCount": int(page_count) if page_count and page_count.isdigit() else None,
                 "sourceFileName": source_file_name,
-                "generatedBy": "ai",  # every question today comes from the Gemini pipeline
+                "generatedBy": "transcribed" if mode == "transcribe" else "ai",
+                "needsAnswerKey": needs_answer_key,
                 "createdAt": firestore.SERVER_TIMESTAMP,
                 "createdBy": uploaded_by,
             }
