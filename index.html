@@ -936,7 +936,34 @@ function mobileNavItem(t, icon, label) {
     <span class="m-icon">${icon}</span>${label}</button>`;
 }
 
-function switchTab(t) { tab=t; renderApp(); }
+function hasActiveStudyExam() {
+  // true while a practice/full-length test is on screen and not yet
+  // submitted -- used to guard navigating away from it anywhere in the app.
+  return typeof studyView !== 'undefined' && (studyView === 'exam' || studyView === 'fullExam');
+}
+function exitActiveStudyExam() {
+  // Discards the in-progress test, same as the exam's own Cancel button --
+  // used both by that button and by the leave-exam confirmation below, so
+  // "leaving" always means the same thing everywhere in the app.
+  if (typeof stopStudyTimer === 'function') stopStudyTimer();
+  studyExamQuestions = []; studyExamAnswers = {};
+  studyFullPool = null; studyFullCurrentQ = null; studyFullProgression = []; studyFullAnswer = undefined;
+  studyView = 'home';
+}
+function confirmLeaveActiveExam() {
+  if (!hasActiveStudyExam()) return true;
+  if (!confirm('Do you really want to move away from the active exam? Your progress on this attempt will be lost.')) return false;
+  exitActiveStudyExam();
+  return true;
+}
+function switchTab(t) {
+  if (t === tab) return;
+  if (!confirmLeaveActiveExam()) return;
+  tab=t; renderApp();
+}
+window.addEventListener('beforeunload', (e) => {
+  if (hasActiveStudyExam()) { e.preventDefault(); e.returnValue = ''; }
+});
 
 // ══════════════════════════════════════════════════════════════
 //  TAB CONTENT

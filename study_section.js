@@ -869,7 +869,7 @@ function renderExamView() {
       </div>`).join('')}
     <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn" onclick="submitExam()">✅ Submit Exam</button>
-      <button class="btn btn-secondary" onclick="stopStudyTimer(); studyView='home'; renderApp();">Cancel</button>
+      <button class="btn btn-secondary" onclick="if(confirm('Cancel this practice test? Your progress on this attempt will be lost.')) { exitActiveStudyExam(); renderApp(); }">Cancel</button>
     </div>
   </div>`;
 }
