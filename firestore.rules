@@ -101,8 +101,12 @@ service cloud.firestore {
     }
 
     // Questions are generated server-side only; students/parents read them.
+    // An admin can delete one (e.g. cleaning up a mis-scanned page or a
+    // transcribed question with no findable answer) -- never update, since
+    // editing question content/answers server-side only, via the Admin SDK.
     match /examQuestions/{id} {
       allow read: if isAdmin() || ownsChild(resource.data.childId);
+      allow delete: if isAdmin();
     }
 
     match /uploadBatches/{id} {

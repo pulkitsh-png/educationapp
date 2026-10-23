@@ -631,8 +631,11 @@ async function openPageGallery() {
   const allQuestions = await getCachedExamQuestions();
   const seen = {};
   allQuestions.filter(q => q.chapterId === studyChapterId).forEach(q => {
-    if (!q.sourceImage || seen[q.sourceImage]) return;
-    seen[q.sourceImage] = { path: q.sourceImage, topic: q.topic, chapter: q.chapter, subject: q.subject, url: null };
+    if (!q.sourceImage) return;
+    if (!seen[q.sourceImage]) {
+      seen[q.sourceImage] = { path: q.sourceImage, topic: q.topic, chapter: q.chapter, subject: q.subject, url: null, questionCount: 0 };
+    }
+    seen[q.sourceImage].questionCount++;
   });
   studyPages = Object.values(seen).sort((a,b) => (a.chapter||'').localeCompare(b.chapter||'') || (a.topic||'').localeCompare(b.topic||''));
   studyView = 'pages';
@@ -664,6 +667,7 @@ function renderPagesView() {
             <div style="font-weight:600;font-size:.85rem">${esc(p.topic || 'Untitled')}</div>
             ${p.chapter ? `<div style="color:#999;font-size:.75rem">${esc(p.chapter)}</div>` : ''}
             <button class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%" onclick="openPageFullSize('${p.path.replace(/'/g,"\\'")}')">Open full size ↗</button>
+            ${canEdit() ? `<button class="btn btn-sm" style="margin-top:6px;width:100%;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="deleteScannedPage('${p.path.replace(/'/g,"\\'")}')">🗑️ Delete page${p.questionCount ? ` (${p.questionCount}q)` : ''}</button>` : ''}
           </div>
         </div>`;
       }).join('') || '<p style="color:#999">No scanned pages yet for this chapter.</p>'}
@@ -677,6 +681,55 @@ async function openPageFullSize(path) {
     window.open(url, '_blank', 'noopener');
   } catch (e) {
     showToast('⚠️ Could not open page.');
+  }
+}
+
+async function deleteScannedPage(path) {
+  if (!canEdit()) return;
+  const page = studyPages.find(p => p.path === path);
+  const qCount = page ? page.questionCount : 0;
+  if (!confirm(`Delete this scanned page${qCount ? ` and all ${qCount} question(s) generated from it` : ''}? This cannot be undone.`)) return;
+  studyBusy = true; renderApp();
+  try {
+    const allQuestions = await getCachedExamQuestions();
+    const related = allQuestions.filter(q => q.sourceImage === path);
+    if (related.length) {
+      const batch = db.batch();
+      related.forEach(q => batch.delete(db.collection('examQuestions').doc(q.id)));
+      await batch.commit();
+    }
+    // Best-effort cleanup of any cropped figures plus the source page itself in Storage --
+    // the Firestore deletes above are what actually keeps the question bank/exams correct,
+    // so a Storage cleanup failure here is never worth surfacing as an error.
+    await Promise.all([
+      ...related.filter(q => q.croppedImage).map(q => storage.ref().child(q.croppedImage).delete().catch(() => {})),
+      storage.ref().child(path).delete().catch(() => {}),
+    ]);
+    invalidateExamQuestionsCache();
+    studyPages = studyPages.filter(p => p.path !== path);
+    showToast(`🗑️ Deleted page${related.length ? ` and ${related.length} question(s)` : ''}.`);
+  } catch (e) {
+    console.error(e);
+    showToast('❌ Could not delete this page. ' + (e.message || ''));
+  } finally {
+    studyBusy = false; renderApp();
+  }
+}
+
+async function deleteBankQuestion(id) {
+  if (!canEdit()) return;
+  const q = studyBankQuestions.find(x => x.id === id);
+  if (!confirm('Delete this question? This cannot be undone.')) return;
+  try {
+    await db.collection('examQuestions').doc(id).delete();
+    if (q && q.croppedImage) storage.ref().child(q.croppedImage).delete().catch(() => {});
+    invalidateExamQuestionsCache();
+    studyBankQuestions = studyBankQuestions.filter(x => x.id !== id);
+    renderApp();
+    showToast('🗑️ Question deleted.');
+  } catch (e) {
+    console.error(e);
+    showToast('❌ Could not delete this question. ' + (e.message || ''));
   }
 }
 
@@ -792,9 +845,12 @@ function renderBankView() {
       </div>
       ${qs.map((q, qi) => `
         <div style="padding:14px;border:1px solid #eee;border-radius:10px;margin-top:8px">
-          <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start">
             <strong>${esc(q.topic)}</strong>
-            ${q.chapter ? `<span style="color:#999;font-size:.78rem">${esc(q.chapter)}</span>` : ''}
+            <div style="display:flex;align-items:center;gap:8px">
+              ${q.chapter ? `<span style="color:#999;font-size:.78rem">${esc(q.chapter)}</span>` : ''}
+              ${canEdit() ? `<button class="btn btn-sm" style="padding:2px 8px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="deleteBankQuestion('${q.id}')" title="Delete this question">🗑️</button>` : ''}
+            </div>
           </div>
           <div style="margin-top:6px">${esc(q.question)}</div>
           ${renderPageReference(q)}
