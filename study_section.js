@@ -614,9 +614,10 @@ function renderUploadView() {
 
 async function openPageGallery() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+  if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
   const allQuestions = await getCachedExamQuestions();
   const seen = {};
-  allQuestions.forEach(q => {
+  allQuestions.filter(q => q.chapterId === studyChapterId).forEach(q => {
     if (!q.sourceImage || seen[q.sourceImage]) return;
     seen[q.sourceImage] = { path: q.sourceImage, topic: q.topic, chapter: q.chapter, subject: q.subject, url: null };
   });
@@ -635,7 +636,7 @@ function renderPagesView() {
   return `
   <div class="card" style="padding:20px;max-width:960px">
     <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">← Back</button>
-    <h2>🖼️ Scanned Pages <span style="font-weight:400;color:#888;font-size:1rem">(${studyPages.length})</span></h2>
+    <h2>🖼️ Scanned Pages <span style="font-weight:400;color:#888;font-size:1rem">(${studyPages.length}${getStudyChapter(studyChapterId) ? ' · ' + esc(getStudyChapter(studyChapterId).title) : ''})</span></h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:16px">
       ${studyPages.map(p => {
         const isPdf = p.path.toLowerCase().endsWith('.pdf');
@@ -652,7 +653,7 @@ function renderPagesView() {
             <button class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%" onclick="openPageFullSize('${p.path.replace(/'/g,"\\'")}')">Open full size ↗</button>
           </div>
         </div>`;
-      }).join('') || '<p style="color:#999">No scanned pages yet.</p>'}
+      }).join('') || '<p style="color:#999">No scanned pages yet for this chapter.</p>'}
     </div>
   </div>`;
 }
