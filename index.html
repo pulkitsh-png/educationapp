@@ -957,9 +957,10 @@ function confirmLeaveActiveExam() {
   return true;
 }
 function switchTab(t) {
-  if (t === tab) return;
   if (!confirmLeaveActiveExam()) return;
-  tab=t; renderApp();
+  tab = t;
+  if (t === 'study') studyView = 'home'; // clicking the nav item always lands on Study & Exam's home page, even when already on this tab
+  renderApp();
 }
 window.addEventListener('beforeunload', (e) => {
   if (hasActiveStudyExam()) { e.preventDefault(); e.returnValue = ''; }
