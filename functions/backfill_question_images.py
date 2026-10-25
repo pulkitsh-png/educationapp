@@ -46,6 +46,14 @@ import sys
 import time
 from collections import defaultdict
 
+# Windows consoles often default to a non-UTF-8 codepage (cp1252/ascii), which
+# throws UnicodeEncodeError the moment any print() -- including an exception
+# message from the Gemini SDK -- contains a character outside that codepage.
+# Force UTF-8 for this script's own stdout/stderr so that can't happen.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import firebase_admin
 from firebase_admin import firestore, storage
 from google import genai
