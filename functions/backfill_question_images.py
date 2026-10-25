@@ -108,8 +108,8 @@ def crop_region(file_bytes: bytes, mime_type: str, region: dict, pdf_page_index)
 PROMPT_TEMPLATE = """Below is a scanned textbook page (a single image, or a PDF that may contain one or more pages), followed by a numbered list of questions that were already written from this page. Do NOT rewrite, rephrase, or re-answer any of them -- they're final as-is.
 
 For each numbered question, decide:
-- "requiresImage": true only if the question genuinely cannot be answered from text alone -- e.g. "label the diagram", "what does the chart show", "identify the part shown in the picture", or it explicitly refers to a figure/example/table the student needs to look at. False for ordinary questions, even if the page happens to contain a picture somewhere.
-- "imageRegion": ONLY when requiresImage is true -- the tight bounding box of the SPECIFIC diagram/chart/figure/table this question refers to (not the whole page), as {{"yMin":0,"xMin":0,"yMax":1000,"xMax":1000}} on a 0-1000 normalized scale where (0,0) is the page's top-left corner. When requiresImage is false, set to null.
+- "requiresImage": true if the question genuinely cannot be answered from its own text and options alone. This covers two cases: (1) a diagram/chart/figure/table the question asks about, AND (2) a word problem, passage, or example on the page that the question REFERS BACK TO without fully restating it (e.g. "according to the problem...", "in the example above...") -- if the question tests specific numbers/details that live only on the page rather than in the question's own wording, requiresImage must be true so the student can see that source text. False only when the question is fully self-contained.
+- "imageRegion": ONLY when requiresImage is true -- the tight bounding box of the SPECIFIC region this question depends on: the diagram/chart/figure/table, OR the block of problem/passage text it refers back to (not the whole page), as {{"yMin":0,"xMin":0,"yMax":1000,"xMax":1000}} on a 0-1000 normalized scale where (0,0) is the page's top-left corner. When requiresImage is false, set to null.
 - "pdfPageIndex": ONLY when the source is a multi-page PDF and requiresImage is true -- the 0-based index of the PDF page the imageRegion is on. Otherwise null.
 
 Questions:
@@ -137,6 +137,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int, default=None, help="Only process this many source pages (for a quick test run).")
+    parser.add_argument("--recheck", action="store_true", help="Also re-look at questions already marked imageBackfillDone with requiresImage=false (e.g. after the requiresImage criteria were broadened) -- never re-looks at ones that already got a croppedImage, since those are already correctly handled.")
     args = parser.parse_args()
 
     gemini_key = os.environ.get("GEMINI_API_KEY")
@@ -148,16 +149,16 @@ def main():
     bucket = storage.bucket()
     client = genai.Client(api_key=gemini_key)
 
-    print("Scanning examQuestions for ones that haven't been looked at yet...")
+    print("Scanning examQuestions for candidates..." + (" (--recheck: including previously-done false-negatives)" if args.recheck else ""))
     all_docs = list(db.collection("examQuestions").stream())
     candidates = []
     for doc in all_docs:
         q = doc.to_dict()
-        if q.get("imageBackfillDone"):
+        if q.get("croppedImage"):
+            continue  # already has a cropped image -- correctly handled either way
+        if q.get("imageBackfillDone") and not (args.recheck and not q.get("requiresImage")):
             continue
         if not q.get("sourceImage"):
-            continue
-        if q.get("croppedImage"):
             continue
         candidates.append((doc.id, q))
 
