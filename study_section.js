@@ -45,6 +45,29 @@ var studyManageGroups = [];
 var studyManageBusy = false;
 var studyQuickSetupOpen = false;
 var FULL_LEVELS = ['Simple', 'Medium', 'Hard', 'Complex'];
+
+// Complexity filter shared by every test/practice mode. 'Mixed' keeps the
+// original behavior; otherwise only questions of that difficulty are used.
+// "Easy" is the label shown to the user for the stored difficulty "Simple".
+var studyComplexity = 'Mixed';
+var COMPLEXITY_OPTIONS = [
+  { value: 'Mixed', label: 'Mixed' },
+  { value: 'Simple', label: 'Easy' },
+  { value: 'Medium', label: 'Medium' },
+  { value: 'Hard', label: 'Hard' },
+  { value: 'Complex', label: 'Complex' },
+];
+function complexityLabel(v) { const o = COMPLEXITY_OPTIONS.find(x => x.value === v); return o ? o.label : v; }
+function filterByComplexity(qs) {
+  return studyComplexity === 'Mixed' ? qs : qs.filter(q => (q.difficulty || 'Medium') === studyComplexity);
+}
+function renderComplexitySelect(small) {
+  return `<span style="font-size:${small ? '.8rem' : '.9rem'};color:#666">Complexity:
+    <select id="study-complexity" onchange="studyComplexity=this.value" style="padding:${small ? '4px 6px' : '6px 8px'};border-radius:6px;border:1px solid #ddd">
+      ${COMPLEXITY_OPTIONS.map(o => `<option value="${o.value}" ${o.value===studyComplexity?'selected':''}>${o.label}</option>`).join('')}
+    </select>
+  </span>`;
+}
 var studyFullPool = null;
 var studyFullProgression = [];
 var studyFullCurrentQ = null;
@@ -534,6 +557,7 @@ function renderParentChapterHome(chapter, stats) {
     <div style="margin-top:16px">
       <div style="font-weight:700;color:#555;font-size:.8rem;letter-spacing:.03em;margin-bottom:8px">LEARNING ACTIVITY</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        ${renderComplexitySelect(true)}
         <button class="btn btn-secondary btn-sm" onclick="toggleQuickSetup()">📝 Quick Practice</button>
         ${studyQuickSetupOpen ? `
           <span style="font-size:.8rem;color:#666">Count:
@@ -555,6 +579,7 @@ function renderStudentChapterHome(chapter, stats) {
   if (questionsAvailable === null) return `<p style="color:#888">Loading…</p>`;
   if (questionsAvailable === 0) return `<p style="color:#888">Nothing to practice yet for this chapter — check back once your parent adds some pages!</p>`;
   return `
+    <div style="margin:14px 0 0">${renderComplexitySelect(false)}</div>
     <div style="margin:14px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button class="btn" style="font-size:1.05rem;padding:16px 26px" onclick="toggleQuickSetup()">📝 Short Practice Test</button>
       ${studyQuickSetupOpen ? `
@@ -868,8 +893,11 @@ async function startExamFromBank() {
   if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
   const count = parseInt(document.getElementById('study-exam-count')?.value || '10', 10);
   const allQuestions = await getCachedExamQuestions();
-  const all = allQuestions.filter(q => q.chapterId === studyChapterId && !q.needsAnswerKey);
-  if (!all.length) { showToast('⚠️ No questions yet for this chapter — upload a page first.'); return; }
+  const chapterQs = allQuestions.filter(q => q.chapterId === studyChapterId && !q.needsAnswerKey);
+  if (!chapterQs.length) { showToast('⚠️ No questions yet for this chapter — upload a page first.'); return; }
+  const all = filterByComplexity(chapterQs);
+  if (!all.length) { showToast(`⚠️ No ${complexityLabel(studyComplexity)} questions in this chapter yet — try Mixed or another complexity.`); return; }
+  if (all.length < count) showToast(`Only ${all.length} ${complexityLabel(studyComplexity)} question(s) available — using all of them.`);
   const shuffled = all.slice();
   for (let i = shuffled.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]; }
   studyExamQuestions = shuffled.slice(0, count);
@@ -916,9 +944,11 @@ async function startRevisionExam() {
 
   const weakSet = new Set(weakKeys);
   const matchesWeak = q => weakSet.has(q.skillName) || weakSet.has(q.topic);
-  let pool = all.filter(matchesWeak);
+  const allF = filterByComplexity(all);
+  if (!allF.length) { showToast(`⚠️ No ${complexityLabel(studyComplexity)} questions in this chapter yet — try Mixed or another complexity.`); return; }
+  let pool = allF.filter(matchesWeak);
   if (pool.length < count) {
-    const rest = all.filter(q => !matchesWeak(q));
+    const rest = allF.filter(q => !matchesWeak(q));
     for (let i = rest.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [rest[i],rest[j]]=[rest[j],rest[i]]; }
     pool = pool.concat(rest.slice(0, count - pool.length));
   }
@@ -972,7 +1002,7 @@ function startFullLengthTest() {
   if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
   studyFullBusy = true; renderApp();
   getCachedExamQuestions().then(allQuestions => {
-    const all = allQuestions.filter(q => q.chapterId === studyChapterId && !q.needsAnswerKey);
+    const all = filterByComplexity(allQuestions.filter(q => q.chapterId === studyChapterId && !q.needsAnswerKey));
     if (all.length < 10) {
       studyFullBusy = false; renderApp();
       showToast(`⚠️ Only ${all.length} question(s) available for this chapter's full-length test — upload more pages across a mix of difficulties (aim for 20+) before trying this.`);
