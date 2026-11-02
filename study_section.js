@@ -913,6 +913,9 @@ function renderBankView() {
 }
 
 async function startExamFromBank() {
+  try { await startExamFromBankInner(); } catch (e) { console.error('startExamFromBank failed:', e); showToast('❌ Could not start: ' + ((e && (e.code || e.message)) || 'unknown error')); }
+}
+async function startExamFromBankInner() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
   if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
   const count = parseInt(document.getElementById('study-exam-count')?.value || '10', 10);
@@ -933,6 +936,9 @@ async function startExamFromBank() {
 }
 
 async function startRevisionExam() {
+  try { await startRevisionExamInner(); } catch (e) { console.error('startRevisionExam failed:', e); showToast('❌ Could not start: ' + ((e && (e.code || e.message)) || 'unknown error')); }
+}
+async function startRevisionExamInner() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
   if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
   const count = parseInt(document.getElementById('study-exam-count')?.value || '10', 10);
