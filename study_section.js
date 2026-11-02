@@ -35,6 +35,8 @@ function getCachedExamQuestions(forceRefresh) {
       promise: db.collection('examQuestions').where('childId', '==', studyChildId).get()
         .then(snap => snap.docs.map(d => ({ id: d.id, ...d.data() }))),
     };
+    const failed = studyQuestionsCache;
+    failed.promise.catch(() => { if (studyQuestionsCache === failed) studyQuestionsCache = { childId: null, promise: null }; });
   }
   return studyQuestionsCache.promise;
 }
@@ -226,7 +228,24 @@ async function createChapter() {
 }
 
 // ── Chapter readiness stats (questions available, skills, gaps) ──────────
+var studyChapterStatsError = {};
+async function retryChapterStats(chapterId) {
+  delete studyChapterStatsError[chapterId];
+  invalidateExamQuestionsCache();
+  renderApp();
+  try { await loadChapterStats(chapterId); } catch (e) { /* surfaced via studyChapterStatsError */ }
+}
 async function loadChapterStats(chapterId) {
+  try {
+    return await loadChapterStatsInner(chapterId);
+  } catch (e) {
+    console.error('loadChapterStats failed:', e);
+    studyChapterStatsError[chapterId] = (e && (e.code || e.message)) || 'unknown error';
+    renderApp();
+    throw e;
+  }
+}
+async function loadChapterStatsInner(chapterId) {
   // Queried by childId (not chapterId) and filtered to this chapter in JS --
   // keeps the Firestore security rule provable as "childId == my student's
   // childId" for a student account, without needing a get()-indirection rule.
@@ -466,7 +485,7 @@ function renderChapterHomeView() {
   const isAdmin = canEdit();
   if (!studyMode) studyMode = isAdmin ? 'parent' : 'student';
 
-  if (chapter && !studyChapterStats[chapter.id]) loadChapterStats(chapter.id); // fire-and-forget
+  if (chapter && !studyChapterStats[chapter.id] && !studyChapterStatsError[chapter.id]) loadChapterStats(chapter.id).catch(() => {}); // fire-and-forget
   const stats = chapter ? studyChapterStats[chapter.id] : null;
 
   const modeToggle = isAdmin ? `
@@ -520,6 +539,11 @@ function renderParentChapterHome(chapter, stats) {
     </div>`;
   } else if (unconfirmedCount > 0) {
     primary = `<button class="btn" style="font-size:1rem;padding:14px 22px" onclick="openManageSkills('${chapter.id}')">🧩 Review Skills (${unconfirmedCount})</button>`;
+  } else if (!stats && studyChapterStatsError[chapter.id]) {
+    primary = `<div style="padding:14px 16px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;color:#b91c1c">
+      Couldn't load this chapter (${esc(String(studyChapterStatsError[chapter.id]))}).
+      <button class="btn btn-secondary btn-sm" style="margin-left:8px" onclick="retryChapterStats('${chapter.id}')">Retry</button>
+    </div>`;
   } else if (!stats) {
     primary = `<div style="padding:14px 16px;background:#faf8f5;border:1px solid #eee;border-radius:10px;color:#888">Loading chapter status…</div>`;
   } else if (questionsAvailable === 0) {
