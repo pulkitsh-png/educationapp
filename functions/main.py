@@ -165,6 +165,12 @@ def process_exam_page(event: storage_fn.CloudEvent) -> None:
     parts = storage_path.split("/")
     if len(parts) < 3:
         return
+    # Cropped figures are written back under examPages/{childId}/crops/ by this
+    # very function. Without this guard each crop re-triggers the function,
+    # which generates questions from the crop and saves more crops -- an
+    # endless (and Gemini-credit-burning) loop.
+    if "crops" in parts[2:-1]:
+        return
     child_id = parts[1]
 
     metadata = data.metadata or {}

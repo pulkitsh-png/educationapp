@@ -813,77 +813,166 @@ function renderUploadView() {
   </div>`;
 }
 
-async function openPageGallery() {
-  if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
-  if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
-  const allQuestions = await getCachedExamQuestions();
+// ── Scanned Pages screen ─────────────────────────────────────────────────
+// A dedicated screen with three tabs: pages in the current chapter, pages not
+// in any chapter, and pages sitting in other chapters. Pages are grouped from
+// the child's questions by sourceImage. Moving pages (single or bulk) goes
+// through the assign_pages_to_chapter callable.
+var studyPagesTab = 'chapter'; // 'chapter' | 'unassigned' | 'other'
+var studyPagesLoading = false;
+var studyPagesError = null;
+var studyPagesSelected = {}; // storage path -> true
+var studyOtherPages = [];
+var studyPageUidSeq = 0;
+
+function groupPages(questions) {
   const seen = {};
-  allQuestions.filter(q => q.chapterId === studyChapterId).forEach(q => {
-    if (!q.sourceImage) return;
+  questions.forEach(q => {
+    if (!q.sourceImage || q.sourceImage.includes('/crops/')) return; // cropped figures aren't pages
     if (!seen[q.sourceImage]) {
-      seen[q.sourceImage] = { path: q.sourceImage, topic: q.topic, chapter: q.chapter, subject: q.subject, url: null, questionCount: 0 };
+      seen[q.sourceImage] = {
+        uid: ++studyPageUidSeq, path: q.sourceImage, topic: q.topic, chapter: q.chapter, chapterId: q.chapterId || null,
+        subject: q.subject, fileName: q.sourceFileName || '', pageNumber: q.pageNumber || null, pageCount: q.pageCount || null,
+        questionCount: 0,
+      };
     }
     seen[q.sourceImage].questionCount++;
   });
-  studyPages = Object.values(seen).sort((a,b) => (a.chapter||'').localeCompare(b.chapter||'') || (a.topic||'').localeCompare(b.topic||''));
-  const unseen = {};
-  allQuestions.filter(q => !q.chapterId).forEach(q => {
-    if (!q.sourceImage) return;
-    if (!unseen[q.sourceImage]) {
-      unseen[q.sourceImage] = { path: q.sourceImage, topic: q.topic, chapter: q.chapter, subject: q.subject, url: null, questionCount: 0, unassigned: true };
-    }
-    unseen[q.sourceImage].questionCount++;
-  });
-  studyUnassignedPages = Object.values(unseen).sort((a,b) => (a.subject||'').localeCompare(b.subject||'') || (a.topic||'').localeCompare(b.topic||''));
-  studyView = 'pages';
-  renderApp();
+  return Object.values(seen);
+}
+function currentPageList() {
+  return studyPagesTab === 'unassigned' ? studyUnassignedPages : studyPagesTab === 'other' ? studyOtherPages : studyPages;
+}
 
-  for (const p of [...studyPages, ...studyUnassignedPages]) {
-    if (p.path.toLowerCase().endsWith('.pdf')) continue;
-    try { p.url = await getPageImageUrl(p.path); } catch (e) { p.url = null; }
+async function openPageGallery(tab) {
+  if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+  if (!studyChapterId) { showToast('⚠️ Pick a chapter first.'); return; }
+  studyPagesTab = (typeof tab === 'string') ? tab : 'chapter';
+  studyPagesSelected = {}; studyPagesError = null; studyPagesLoading = true;
+  studyPages = []; studyUnassignedPages = []; studyOtherPages = [];
+  studyView = 'pages';
+  renderApp(); // show the screen immediately with a loading state
+  try {
+    const all = await getCachedExamQuestions(true);
+    const byTopic = (a, b) => (a.topic || '').localeCompare(b.topic || '') || (a.pageNumber || 0) - (b.pageNumber || 0);
+    studyPages = groupPages(all.filter(q => q.chapterId === studyChapterId)).sort(byTopic);
+    studyUnassignedPages = groupPages(all.filter(q => !q.chapterId)).sort(byTopic);
+    studyOtherPages = groupPages(all.filter(q => q.chapterId && q.chapterId !== studyChapterId))
+      .sort((a, b) => (a.chapter || '').localeCompare(b.chapter || '') || byTopic(a, b));
+  } catch (e) {
+    console.error('openPageGallery failed:', e);
+    studyPagesError = (e && (e.code || e.message)) || 'unknown error';
+  } finally {
+    studyPagesLoading = false;
     if (studyView === 'pages') renderApp();
   }
+  if (!studyPagesError) loadPageThumbs(currentPageList());
 }
+
+// Fills thumbnails in place (no re-render) so ticking boxes isn't interrupted.
+async function loadPageThumbs(list) {
+  for (const p of list) {
+    if (p.path.toLowerCase().endsWith('.pdf')) continue;
+    try {
+      const url = await getPageImageUrl(p.path);
+      if (studyView !== 'pages') return;
+      const el = document.getElementById('pg-img-' + p.uid);
+      if (el && !el.getAttribute('src')) el.setAttribute('src', url);
+    } catch (e) { /* thumbnail is optional */ }
+  }
+}
+
+function setPagesTab(t) {
+  studyPagesTab = t; studyPagesSelected = {};
+  renderApp();
+  loadPageThumbs(currentPageList());
+}
+function togglePageSel(path, cb) {
+  if (cb.checked) studyPagesSelected[path] = true; else delete studyPagesSelected[path];
+  const label = cb.closest('[data-pgcard]');
+  if (label) label.style.borderColor = cb.checked ? '#16a34a' : '#eee';
+  const el = document.getElementById('pg-sel-count');
+  if (el) el.textContent = Object.keys(studyPagesSelected).length;
+}
+function selectAllPages() { currentPageList().forEach(p => { studyPagesSelected[p.path] = true; }); renderApp(); }
+function clearPageSelection() { studyPagesSelected = {}; renderApp(); }
 
 function renderPageCard(p) {
   const isPdf = p.path.toLowerCase().endsWith('.pdf');
   const safePath = p.path.replace(/'/g, "\\'");
-  const targets = studyChapters.filter(c => c.childId === studyChildId && (p.unassigned || c.id !== studyChapterId));
+  const url = studyImageUrlCache[p.path] || '';
+  const checked = !!studyPagesSelected[p.path];
+  const chapterObj = p.chapterId ? getStudyChapter(p.chapterId) : null;
+  const where = p.chapterId ? (chapterObj ? chapterObj.title : (p.chapter || '(removed chapter)')) : 'Not in any chapter';
+  const targets = studyChapters.filter(c => c.childId === studyChildId && c.id !== p.chapterId);
   return `
-        <div style="border:1px solid #eee;border-radius:10px;overflow:hidden;background:#fafafa">
-          ${isPdf ? `
-            <a href="${p.path}" onclick="return false" style="display:flex;height:120px;align-items:center;justify-content:center;font-size:2.2rem;background:#f1f1f1;text-decoration:none">📄</a>
-          ` : p.url ? `
-            <img src="${p.url}" style="width:100%;height:120px;object-fit:cover;display:block" loading="lazy">
-          ` : `<div style="height:120px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:.8rem">Loading…</div>`}
-          <div style="padding:8px">
-            <div style="font-weight:600;font-size:.85rem">${esc(p.topic || 'Untitled')}</div>
-            ${p.chapter ? `<div style="color:#999;font-size:.75rem">${esc(p.chapter)}</div>` : ''}
-            <button class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%" onclick="openPageFullSize('${safePath}')">Open full size ↗</button>
-            ${canEdit() && targets.length ? `<select style="margin-top:6px;width:100%;padding:5px;border-radius:6px;border:1px solid #ddd;font-size:.8rem" onchange="movePageToChapter('${safePath}', this.value); this.value=''">
-              <option value="">${p.unassigned ? 'Assign to chapter…' : 'Move to chapter…'}</option>
-              ${targets.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}
-            </select>` : ''}
-            ${canEdit() ? `<button class="btn btn-sm" style="margin-top:6px;width:100%;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="deleteScannedPage('${safePath}')">🗑️ Delete page${p.questionCount ? ` (${p.questionCount}q)` : ''}</button>` : ''}
-          </div>
-        </div>`;
+    <div data-pgcard style="border:2px solid ${checked ? '#16a34a' : '#eee'};border-radius:10px;overflow:hidden;background:#fafafa">
+      <div style="position:relative">
+        ${isPdf
+          ? `<div style="height:120px;display:flex;align-items:center;justify-content:center;font-size:2.2rem;background:#f1f1f1">📄</div>`
+          : `<img id="pg-img-${p.uid}" ${url ? `src="${url}"` : ''} alt="" style="width:100%;height:120px;object-fit:cover;display:block;background:#f1f1f1">`}
+        ${canEdit() ? `<input type="checkbox" ${checked ? 'checked' : ''} onchange="togglePageSel('${safePath}', this)" style="position:absolute;top:8px;left:8px;width:18px;height:18px">` : ''}
+      </div>
+      <div style="padding:8px">
+        <div style="font-weight:600;font-size:.85rem">${esc(p.topic || 'Untitled')}</div>
+        <div style="color:#999;font-size:.75rem">${p.fileName ? esc(p.fileName) + ' · ' : ''}${p.pageNumber ? `Page ${p.pageNumber}${p.pageCount ? ' of ' + p.pageCount : ''} · ` : ''}${p.questionCount}q</div>
+        <div style="color:#b45309;font-size:.75rem">In: ${esc(where)}</div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%" onclick="openPageFullSize('${safePath}')">Open full size ↗</button>
+        ${canEdit() && targets.length ? `<select style="margin-top:6px;width:100%;padding:5px;border-radius:6px;border:1px solid #ddd;font-size:.8rem" onchange="movePageToChapter('${safePath}', this.value); this.value=''">
+          <option value="">${p.chapterId ? 'Move to chapter…' : 'Assign to chapter…'}</option>
+          ${targets.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}
+        </select>` : ''}
+        ${canEdit() ? `<button class="btn btn-sm" style="margin-top:6px;width:100%;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="deleteScannedPage('${safePath}')">🗑️ Delete page${p.questionCount ? ` (${p.questionCount}q)` : ''}</button>` : ''}
+      </div>
+    </div>`;
 }
 
 function renderPagesView() {
+  const chapter = getStudyChapter(studyChapterId);
+  const list = currentPageList();
+  const selCount = Object.keys(studyPagesSelected).length;
+  const tabBtn = (id, label, n) => `<button class="btn ${studyPagesTab === id ? '' : 'btn-secondary'} btn-sm" onclick="setPagesTab('${id}')">${label} (${n})</button>`;
+  const helper = {
+    chapter: 'Pages whose questions belong to this chapter.',
+    unassigned: 'Pages (and their questions) that are not assigned to any chapter yet. Assign them to a chapter below.',
+    other: 'Pages currently sitting in a different chapter. Tick the ones that belong in this chapter and move them in.',
+  }[studyPagesTab];
+  const empty = {
+    chapter: 'No pages in this chapter yet. Check the other tabs to pull pages in, or upload new ones.',
+    unassigned: 'Every page is already assigned to a chapter.',
+    other: 'No pages in other chapters.',
+  }[studyPagesTab];
+  const bulkTargets = studyChapters.filter(c => c.childId === studyChildId && !(studyPagesTab === 'chapter' && c.id === studyChapterId));
   return `
   <div class="card" style="padding:20px;max-width:960px">
     <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">← Back</button>
-    <h2>🖼️ Scanned Pages <span style="font-weight:400;color:#888;font-size:1rem">(${studyPages.length}${getStudyChapter(studyChapterId) ? ' · ' + esc(getStudyChapter(studyChapterId).title) : ''})</span></h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:16px">
-      ${studyPages.map(renderPageCard).join('') || '<p style="color:#999">No scanned pages yet for this chapter.</p>'}
-    </div>
+    <h2 style="margin-bottom:2px">🖼️ Scanned Pages</h2>
+    <div style="color:#888;font-size:.9rem">${chapter ? 'Working in: ' + esc(chapter.title) : ''}</div>
 
-    ${studyUnassignedPages.length ? `
-    <h3 style="margin-top:28px">📎 Not in any chapter <span style="font-weight:400;color:#888;font-size:.95rem">(${studyUnassignedPages.length})</span></h3>
-    <p style="color:#777;font-size:.85rem;margin:4px 0 0">These pages, and the questions made from them, aren't assigned to a chapter yet. Use "Assign to chapter…" on a page to put it in a chapter.</p>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:14px">
-      ${studyUnassignedPages.map(renderPageCard).join('')}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+      ${tabBtn('chapter', 'This chapter', studyPages.length)}
+      ${tabBtn('unassigned', 'Not in any chapter', studyUnassignedPages.length)}
+      ${tabBtn('other', 'Other chapters', studyOtherPages.length)}
+    </div>
+    <p style="color:#777;font-size:.85rem;margin:10px 0 0">${helper}</p>
+
+    ${studyPagesLoading ? '<p style="color:#999;margin-top:16px">⏳ Loading pages…</p>'
+      : studyPagesError ? `<div style="margin-top:16px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;color:#b91c1c">Couldn't load pages (${esc(String(studyPagesError))}). <button class="btn btn-secondary btn-sm" onclick="openPageGallery('${studyPagesTab}')">Retry</button></div>`
+      : `
+    ${canEdit() && list.length ? `
+    <div style="position:sticky;top:0;z-index:2;margin-top:14px;padding:10px;background:#f7faf8;border:1px solid #e0e8e3;border-radius:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <span><b id="pg-sel-count">${selCount}</b> selected</span>
+      <button class="btn btn-secondary btn-sm" onclick="selectAllPages()">Select all</button>
+      <button class="btn btn-secondary btn-sm" onclick="clearPageSelection()">Clear</button>
+      <select id="pg-bulk-target" style="padding:6px 8px;border-radius:8px;border:1px solid #ddd">
+        <option value="">Move selected to…</option>
+        ${bulkTargets.map(c => `<option value="${c.id}" ${studyPagesTab !== 'chapter' && c.id === studyChapterId ? 'selected' : ''}>${esc(c.title)}${c.id === studyChapterId ? ' (this chapter)' : ''}</option>`).join('')}
+      </select>
+      <button class="btn btn-sm" onclick="moveSelectedPages()" ${studyBusy ? 'disabled' : ''}>${studyBusy ? '⏳ Moving…' : 'Move'}</button>
     </div>` : ''}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px;margin-top:14px">
+      ${list.map(renderPageCard).join('') || `<p style="color:#999">${empty}</p>`}
+    </div>`}
   </div>`;
 }
 
@@ -897,29 +986,41 @@ async function openPageFullSize(path) {
 }
 
 async function movePageToChapter(path, targetChapterId) {
-  if (!canEdit() || !targetChapterId) return;
+  if (!targetChapterId) return;
+  await runMovePages([path], targetChapterId);
+}
+async function moveSelectedPages() {
+  const paths = Object.keys(studyPagesSelected);
+  const sel = document.getElementById('pg-bulk-target');
+  const target = sel ? sel.value : '';
+  if (!paths.length) { showToast('⚠️ Tick at least one page first.'); return; }
+  if (!target) { showToast('⚠️ Choose which chapter to move them to.'); return; }
+  await runMovePages(paths, target);
+}
+async function runMovePages(paths, targetChapterId) {
+  if (!canEdit() || !paths.length) return;
   const target = getStudyChapter(targetChapterId);
-  const page = studyPages.find(p => p.path === path) || studyUnassignedPages.find(p => p.path === path);
-  if (!confirm(`Move this page${page && page.questionCount ? ` and its ${page.questionCount} question(s)` : ''} to "${target ? target.title : 'that chapter'}"? Skill tags from this chapter will be cleared.`)) return;
+  const everything = [...studyPages, ...studyUnassignedPages, ...studyOtherPages];
+  const qCount = paths.reduce((n, pth) => n + ((everything.find(p => p.path === pth) || {}).questionCount || 0), 0);
+  if (!confirm(`Move ${paths.length} page(s)${qCount ? ` and their ${qCount} question(s)` : ''} to "${target ? target.title : 'that chapter'}"? Skill tags from their old chapter will be cleared.`)) return;
   studyBusy = true; renderApp();
   try {
-    const res = await fx.httpsCallable('assign_pages_to_chapter')({ chapterId: targetChapterId, pagePaths: [path] });
+    const res = await fx.httpsCallable('assign_pages_to_chapter')({ chapterId: targetChapterId, pagePaths: paths });
     invalidateExamQuestionsCache();
     studyChapterStats = {};
-    studyPages = studyPages.filter(p => p.path !== path);
-    studyUnassignedPages = studyUnassignedPages.filter(p => p.path !== path);
     await refreshChapter(targetChapterId);
-    showToast(`✅ Moved ${res.data.movedQuestionCount} question(s) to ${target ? target.title : 'the chapter'}.`);
+    showToast(`✅ Moved ${res.data.pageCount} page(s) / ${res.data.movedQuestionCount} question(s) to ${target ? target.title : 'the chapter'}.`);
   } catch (e) {
-    console.error(e); showToast('❌ ' + (e.message || 'Could not move page.'));
+    console.error(e); showToast('❌ ' + (e.message || 'Could not move pages.'));
   } finally {
-    studyBusy = false; renderApp();
+    studyBusy = false;
   }
+  await openPageGallery(studyPagesTab); // reload lists + counts
 }
 
 async function deleteScannedPage(path) {
   if (!canEdit()) return;
-  const page = studyPages.find(p => p.path === path) || studyUnassignedPages.find(p => p.path === path);
+  const page = [...studyPages, ...studyUnassignedPages, ...studyOtherPages].find(p => p.path === path);
   const qCount = page ? page.questionCount : 0;
   if (!confirm(`Delete this scanned page${qCount ? ` and all ${qCount} question(s) generated from it` : ''}? This cannot be undone.`)) return;
   studyBusy = true; renderApp();
@@ -941,6 +1042,7 @@ async function deleteScannedPage(path) {
     invalidateExamQuestionsCache();
     studyPages = studyPages.filter(p => p.path !== path);
     studyUnassignedPages = studyUnassignedPages.filter(p => p.path !== path);
+    studyOtherPages = studyOtherPages.filter(p => p.path !== path);
     showToast(`🗑️ Deleted page${related.length ? ` and ${related.length} question(s)` : ''}.`);
   } catch (e) {
     console.error(e);
