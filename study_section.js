@@ -16,6 +16,7 @@ var studyActiveBatch = null;
 var studyBatchUnsub = null;
 var studyImageUrlCache = {};
 var studyPages = [];
+var studyUnassignedPages = []; // pages whose questions aren't in any chapter yet (e.g. pre-MVP uploads)
 var studyBooks = [];
 var studyChapters = [];
 var studyMetaLoadedFor = null;
@@ -825,25 +826,30 @@ async function openPageGallery() {
     seen[q.sourceImage].questionCount++;
   });
   studyPages = Object.values(seen).sort((a,b) => (a.chapter||'').localeCompare(b.chapter||'') || (a.topic||'').localeCompare(b.topic||''));
+  const unseen = {};
+  allQuestions.filter(q => !q.chapterId).forEach(q => {
+    if (!q.sourceImage) return;
+    if (!unseen[q.sourceImage]) {
+      unseen[q.sourceImage] = { path: q.sourceImage, topic: q.topic, chapter: q.chapter, subject: q.subject, url: null, questionCount: 0, unassigned: true };
+    }
+    unseen[q.sourceImage].questionCount++;
+  });
+  studyUnassignedPages = Object.values(unseen).sort((a,b) => (a.subject||'').localeCompare(b.subject||'') || (a.topic||'').localeCompare(b.topic||''));
   studyView = 'pages';
   renderApp();
 
-  for (const p of studyPages) {
+  for (const p of [...studyPages, ...studyUnassignedPages]) {
     if (p.path.toLowerCase().endsWith('.pdf')) continue;
     try { p.url = await getPageImageUrl(p.path); } catch (e) { p.url = null; }
     if (studyView === 'pages') renderApp();
   }
 }
 
-function renderPagesView() {
+function renderPageCard(p) {
+  const isPdf = p.path.toLowerCase().endsWith('.pdf');
+  const safePath = p.path.replace(/'/g, "\\'");
+  const targets = studyChapters.filter(c => c.childId === studyChildId && (p.unassigned || c.id !== studyChapterId));
   return `
-  <div class="card" style="padding:20px;max-width:960px">
-    <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">← Back</button>
-    <h2>🖼️ Scanned Pages <span style="font-weight:400;color:#888;font-size:1rem">(${studyPages.length}${getStudyChapter(studyChapterId) ? ' · ' + esc(getStudyChapter(studyChapterId).title) : ''})</span></h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:16px">
-      ${studyPages.map(p => {
-        const isPdf = p.path.toLowerCase().endsWith('.pdf');
-        return `
         <div style="border:1px solid #eee;border-radius:10px;overflow:hidden;background:#fafafa">
           ${isPdf ? `
             <a href="${p.path}" onclick="return false" style="display:flex;height:120px;align-items:center;justify-content:center;font-size:2.2rem;background:#f1f1f1;text-decoration:none">📄</a>
@@ -853,16 +859,31 @@ function renderPagesView() {
           <div style="padding:8px">
             <div style="font-weight:600;font-size:.85rem">${esc(p.topic || 'Untitled')}</div>
             ${p.chapter ? `<div style="color:#999;font-size:.75rem">${esc(p.chapter)}</div>` : ''}
-            <button class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%" onclick="openPageFullSize('${p.path.replace(/'/g,"\\'")}')">Open full size ↗</button>
-            ${canEdit() && studyChapters.some(c => c.childId === studyChildId && c.id !== studyChapterId) ? `<select style="margin-top:6px;width:100%;padding:5px;border-radius:6px;border:1px solid #ddd;font-size:.8rem" onchange="movePageToChapter('${p.path.replace(/'/g,"\\'")}', this.value); this.value=''">
-              <option value="">Move to chapter…</option>
-              ${studyChapters.filter(c => c.childId === studyChildId && c.id !== studyChapterId).map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}
+            <button class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%" onclick="openPageFullSize('${safePath}')">Open full size ↗</button>
+            ${canEdit() && targets.length ? `<select style="margin-top:6px;width:100%;padding:5px;border-radius:6px;border:1px solid #ddd;font-size:.8rem" onchange="movePageToChapter('${safePath}', this.value); this.value=''">
+              <option value="">${p.unassigned ? 'Assign to chapter…' : 'Move to chapter…'}</option>
+              ${targets.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}
             </select>` : ''}
-            ${canEdit() ? `<button class="btn btn-sm" style="margin-top:6px;width:100%;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="deleteScannedPage('${p.path.replace(/'/g,"\\'")}')">🗑️ Delete page${p.questionCount ? ` (${p.questionCount}q)` : ''}</button>` : ''}
+            ${canEdit() ? `<button class="btn btn-sm" style="margin-top:6px;width:100%;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="deleteScannedPage('${safePath}')">🗑️ Delete page${p.questionCount ? ` (${p.questionCount}q)` : ''}</button>` : ''}
           </div>
         </div>`;
-      }).join('') || '<p style="color:#999">No scanned pages yet for this chapter.</p>'}
+}
+
+function renderPagesView() {
+  return `
+  <div class="card" style="padding:20px;max-width:960px">
+    <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">← Back</button>
+    <h2>🖼️ Scanned Pages <span style="font-weight:400;color:#888;font-size:1rem">(${studyPages.length}${getStudyChapter(studyChapterId) ? ' · ' + esc(getStudyChapter(studyChapterId).title) : ''})</span></h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:16px">
+      ${studyPages.map(renderPageCard).join('') || '<p style="color:#999">No scanned pages yet for this chapter.</p>'}
     </div>
+
+    ${studyUnassignedPages.length ? `
+    <h3 style="margin-top:28px">📎 Not in any chapter <span style="font-weight:400;color:#888;font-size:.95rem">(${studyUnassignedPages.length})</span></h3>
+    <p style="color:#777;font-size:.85rem;margin:4px 0 0">These pages, and the questions made from them, aren't assigned to a chapter yet. Use "Assign to chapter…" on a page to put it in a chapter.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:14px">
+      ${studyUnassignedPages.map(renderPageCard).join('')}
+    </div>` : ''}
   </div>`;
 }
 
@@ -878,7 +899,7 @@ async function openPageFullSize(path) {
 async function movePageToChapter(path, targetChapterId) {
   if (!canEdit() || !targetChapterId) return;
   const target = getStudyChapter(targetChapterId);
-  const page = studyPages.find(p => p.path === path);
+  const page = studyPages.find(p => p.path === path) || studyUnassignedPages.find(p => p.path === path);
   if (!confirm(`Move this page${page && page.questionCount ? ` and its ${page.questionCount} question(s)` : ''} to "${target ? target.title : 'that chapter'}"? Skill tags from this chapter will be cleared.`)) return;
   studyBusy = true; renderApp();
   try {
@@ -886,6 +907,7 @@ async function movePageToChapter(path, targetChapterId) {
     invalidateExamQuestionsCache();
     studyChapterStats = {};
     studyPages = studyPages.filter(p => p.path !== path);
+    studyUnassignedPages = studyUnassignedPages.filter(p => p.path !== path);
     await refreshChapter(targetChapterId);
     showToast(`✅ Moved ${res.data.movedQuestionCount} question(s) to ${target ? target.title : 'the chapter'}.`);
   } catch (e) {
@@ -897,7 +919,7 @@ async function movePageToChapter(path, targetChapterId) {
 
 async function deleteScannedPage(path) {
   if (!canEdit()) return;
-  const page = studyPages.find(p => p.path === path);
+  const page = studyPages.find(p => p.path === path) || studyUnassignedPages.find(p => p.path === path);
   const qCount = page ? page.questionCount : 0;
   if (!confirm(`Delete this scanned page${qCount ? ` and all ${qCount} question(s) generated from it` : ''}? This cannot be undone.`)) return;
   studyBusy = true; renderApp();
@@ -918,6 +940,7 @@ async function deleteScannedPage(path) {
     ]);
     invalidateExamQuestionsCache();
     studyPages = studyPages.filter(p => p.path !== path);
+    studyUnassignedPages = studyUnassignedPages.filter(p => p.path !== path);
     showToast(`🗑️ Deleted page${related.length ? ` and ${related.length} question(s)` : ''}.`);
   } catch (e) {
     console.error(e);
