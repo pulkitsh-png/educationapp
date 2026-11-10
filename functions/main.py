@@ -418,6 +418,77 @@ def confirm_chapter_skills(req: https_fn.CallableRequest):
     return {"skillCount": len(name_to_id), "taggedQuestionCount": tagged}
 
 
+@https_fn.on_call(timeout_sec=60)
+def assign_pages_to_chapter(req: https_fn.CallableRequest):
+    """Parent picks which already-uploaded scanned pages belong to a chapter.
+    Moves every question generated from those pages (matched by sourceImage)
+    into the chapter. No Gemini calls -- the questions already exist, only
+    their chapter fields change. Skill tags from the old chapter are cleared
+    (skills are chapter-scoped); if the target chapter already has confirmed
+    skills, questions are re-matched to them by skillName, and any names that
+    don't match are added to the chapter's skillSuggestions."""
+    db = get_db()
+    _require_admin(db, req)
+
+    chapter_id = req.data.get("chapterId")
+    page_paths = {p for p in (req.data.get("pagePaths") or []) if isinstance(p, str) and p}
+    if not chapter_id or not page_paths:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, "chapterId and at least one page are required.")
+    if len(page_paths) > 300:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, "Too many pages in one request (max 300).")
+
+    chapter_ref = db.collection("chapters").document(chapter_id)
+    chapter_snap = chapter_ref.get()
+    if not chapter_snap.exists:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.NOT_FOUND, "Chapter not found.")
+    chapter = chapter_snap.to_dict()
+    child_id = chapter.get("childId")
+
+    skill_name_to_id = {}
+    for d in db.collection("skills").where("chapterId", "==", chapter_id).stream():
+        sd = d.to_dict()
+        if not sd.get("mergedInto"):
+            skill_name_to_id[(sd.get("name") or "").strip().lower()] = d.id
+
+    moved = 0
+    pages_found = set()
+    unmatched_skill_names = set()
+    batch = db.batch()
+    ops = 0
+    # Scoped to the chapter's own child, so pages can never cross children.
+    for doc in db.collection("examQuestions").where("childId", "==", child_id).stream():
+        q = doc.to_dict()
+        src = q.get("sourceImage")
+        if src not in page_paths:
+            continue
+        pages_found.add(src)
+        if q.get("chapterId") == chapter_id:
+            continue
+        name = (q.get("skillName") or "").strip()
+        skill_id = skill_name_to_id.get(name.lower())
+        if name and not skill_id:
+            unmatched_skill_names.add(name)
+        batch.update(doc.reference, {
+            "chapterId": chapter_id,
+            "bookId": chapter.get("bookId"),
+            "chapter": chapter.get("title", ""),
+            "skillId": skill_id,
+        })
+        moved += 1
+        ops += 1
+        if ops >= 450:  # stay under Firestore's 500-op batch limit
+            batch.commit()
+            batch = db.batch()
+            ops = 0
+    if ops:
+        batch.commit()
+
+    if unmatched_skill_names:
+        chapter_ref.update({"skillSuggestions": firestore.ArrayUnion(sorted(unmatched_skill_names))})
+
+    return {"movedQuestionCount": moved, "pageCount": len(pages_found)}
+
+
 @https_fn.on_call(timeout_sec=120)
 def merge_skills(req: https_fn.CallableRequest):
     """Parent-reviewed skill grouping/merge. Unlike confirm_chapter_skills

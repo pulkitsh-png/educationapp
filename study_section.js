@@ -43,6 +43,127 @@ function getCachedExamQuestions(forceRefresh) {
 function invalidateExamQuestionsCache() { studyQuestionsCache = { childId: null, promise: null }; }
 var newChapterDraft = { bookId: '', newBookName: '', newBookSubject: '', newBookType: 'curriculum', title: '', testDate: '' };
 var studyManageChapterId = null;
+
+// ── Page picker for New Chapter ──────────────────────────────────────────
+// Already-uploaded scanned pages (grouped from the child's questions by
+// sourceImage) the parent can pull into a chapter being created. The move is
+// done server-side by the assign_pages_to_chapter callable (Firestore rules
+// don't let the browser edit examQuestions) and never re-runs Gemini.
+var newChapterPickedPages = {}; // storage path -> true
+var pagePool = [];
+var pagePoolFilter = 'all';
+var pagePoolLoading = false;
+
+function buildPagePool(questions) {
+  const seen = {};
+  questions.forEach(q => {
+    if (!q.sourceImage) return;
+    let p = seen[q.sourceImage];
+    if (!p) {
+      const m = q.sourceImage.split('/').pop().match(/^(\d{10,})-/);
+      p = seen[q.sourceImage] = {
+        path: q.sourceImage,
+        fileName: q.sourceFileName || q.sourceImage.split('/').pop(),
+        pageNumber: q.pageNumber || null,
+        pageCount: q.pageCount || null,
+        chapterId: q.chapterId || null,
+        chapterLabel: q.chapter || '',
+        ts: m ? Number(m[1]) : 0,
+        questionCount: 0,
+      };
+    }
+    p.questionCount++;
+  });
+  return Object.values(seen).sort((a, b) => b.ts - a.ts || (a.pageNumber || 0) - (b.pageNumber || 0));
+}
+
+async function openNewChapterView() {
+  newChapterPickedPages = {}; pagePool = []; pagePoolFilter = 'all';
+  studyView = 'newChapter';
+  pagePoolLoading = !!studyChildId;
+  renderApp();
+  if (!studyChildId) return;
+  try {
+    pagePool = buildPagePool(await getCachedExamQuestions(true));
+  } catch (e) {
+    console.error(e); showToast('⚠️ Could not load your uploaded pages.');
+  } finally {
+    pagePoolLoading = false;
+    if (studyView === 'newChapter') renderApp();
+  }
+  // Fill thumbnails in place (no re-render, so typing in the form isn't interrupted).
+  for (let i = 0; i < pagePool.length; i++) {
+    const p = pagePool[i];
+    if (p.path.toLowerCase().endsWith('.pdf')) continue;
+    try {
+      const url = await getPageImageUrl(p.path);
+      const el = document.getElementById('pick-img-' + i);
+      if (el && !el.getAttribute('src')) el.setAttribute('src', url);
+    } catch (e) { /* thumbnail is optional */ }
+  }
+}
+
+function togglePickPage(idx, cb) {
+  const p = pagePool[idx]; if (!p) return;
+  if (cb.checked) newChapterPickedPages[p.path] = true; else delete newChapterPickedPages[p.path];
+  const label = cb.closest('label');
+  if (label) label.style.borderColor = cb.checked ? '#16a34a' : '#eee';
+  const el = document.getElementById('pick-count');
+  if (el) el.textContent = Object.keys(newChapterPickedPages).length;
+}
+function visiblePoolPages() {
+  return pagePool.filter(p => pagePoolFilter === 'all' || (p.chapterId || '') === pagePoolFilter);
+}
+function pickAllVisiblePages() { visiblePoolPages().forEach(p => { newChapterPickedPages[p.path] = true; }); renderApp(); }
+function clearPickedPages() { newChapterPickedPages = {}; renderApp(); }
+function setPagePoolFilter(v) { pagePoolFilter = v; renderApp(); }
+
+function renderPagePicker() {
+  const pickedCount = Object.keys(newChapterPickedPages).length;
+  const chapterIds = [...new Set(pagePool.map(p => p.chapterId || ''))];
+  const labelFor = id => { const c = id ? getStudyChapter(id) : null; return c ? c.title : '(no chapter)'; };
+  const visible = visiblePoolPages();
+  const tiles = visible.map(p => {
+    const idx = pagePool.indexOf(p);
+    const isPdf = p.path.toLowerCase().endsWith('.pdf');
+    const checked = !!newChapterPickedPages[p.path];
+    const url = studyImageUrlCache[p.path] || '';
+    const cur = p.chapterId ? labelFor(p.chapterId) : (p.chapterLabel || '(no chapter)');
+    return `
+      <label style="display:block;border:2px solid ${checked ? '#16a34a' : '#eee'};border-radius:10px;overflow:hidden;background:#fafafa;cursor:pointer">
+        <div style="position:relative">
+          ${isPdf
+            ? `<div style="height:90px;display:flex;align-items:center;justify-content:center;font-size:2rem;background:#f1f1f1">📄</div>`
+            : `<img id="pick-img-${idx}" ${url ? `src="${url}"` : ''} alt="" style="width:100%;height:90px;object-fit:cover;display:block;background:#f1f1f1">`}
+          <input type="checkbox" ${checked ? 'checked' : ''} onchange="togglePickPage(${idx}, this)" style="position:absolute;top:6px;left:6px;width:18px;height:18px">
+        </div>
+        <div style="padding:6px 8px;font-size:.75rem">
+          <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.fileName)}">${esc(p.fileName)}</div>
+          <div style="color:#888">${p.pageNumber ? `Page ${p.pageNumber}${p.pageCount ? ' of ' + p.pageCount : ''} · ` : ''}${p.questionCount}q</div>
+          <div style="color:#b45309">Now in: ${esc(cur)}</div>
+        </div>
+      </label>`;
+  }).join('');
+  return `
+    <div style="margin-top:18px;padding:12px;border:1px solid #e0e8e3;border-radius:10px;background:#f7faf8">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div style="font-weight:600">📄 Pages for this chapter <span style="font-weight:400;color:#888">(optional)</span></div>
+        <div style="font-size:.85rem;color:#555"><span id="pick-count">${pickedCount}</span> selected</div>
+      </div>
+      <p style="color:#777;font-size:.82rem;margin:6px 0 10px">Choose already-uploaded pages to move into this chapter. Their questions go with them; no new AI processing or cost.</p>
+      ${pagePoolLoading ? '<p style="color:#999">Loading uploaded pages…</p>' : !pagePool.length ? '<p style="color:#999">No uploaded pages yet for this child.</p>' : `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+          <select style="padding:6px 8px;border-radius:8px;border:1px solid #ddd" onchange="setPagePoolFilter(this.value)">
+            <option value="all" ${pagePoolFilter === 'all' ? 'selected' : ''}>Show all pages (${pagePool.length})</option>
+            ${chapterIds.map(id => `<option value="${esc(id)}" ${pagePoolFilter === id ? 'selected' : ''}>From: ${esc(labelFor(id))} (${pagePool.filter(p => (p.chapterId || '') === id).length})</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="pickAllVisiblePages()">Select all shown</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="clearPickedPages()">Clear</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;max-height:420px;overflow:auto">${tiles || '<p style="color:#999">No pages match this filter.</p>'}</div>
+        <p style="color:#999;font-size:.75rem;margin:8px 0 0">Pages already in another chapter are moved out of it, and their old skill tags are cleared.</p>`}
+    </div>`;
+}
 var studyManageGroups = [];
 var studyManageBusy = false;
 var studyQuickSetupOpen = false;
@@ -173,6 +294,8 @@ function renderNewChapterView() {
     <label style="font-size:.85rem;color:#666;display:block;margin:14px 0 4px">Test date (optional)</label>
     <input type="date" value="${esc(d.testDate)}" style="padding:8px;border-radius:8px;border:1px solid #ddd" oninput="newChapterDraft.testDate=this.value">
 
+    ${renderPagePicker()}
+
     <div style="margin-top:18px">
       <button class="btn" onclick="createChapter()" ${studyBusy?'disabled':''}>${studyBusy ? '⏳ Creating…' : '✅ Create Chapter'}</button>
     </div>
@@ -183,6 +306,7 @@ async function createChapter() {
   const d = newChapterDraft;
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
   if (!d.title.trim()) { showToast('⚠️ Give the chapter a title.'); return; }
+  const pickedPaths = Object.keys(newChapterPickedPages);
   let bookId = d.bookId;
   if (bookId === '__new__') {
     if (!d.newBookName.trim()) { showToast('⚠️ Give the new book a name.'); return; }
@@ -219,7 +343,21 @@ async function createChapter() {
     studyChapterId = chapterRef.id;
     newChapterDraft = { bookId: '', newBookName: '', newBookSubject: '', newBookType: 'curriculum', title: '', testDate: '' };
     studyView = 'home';
-    showToast('✅ Chapter created.');
+    newChapterPickedPages = {};
+    if (pickedPaths.length) {
+      try {
+        const res = await fx.httpsCallable('assign_pages_to_chapter')({ chapterId: chapterRef.id, pagePaths: pickedPaths });
+        invalidateExamQuestionsCache();
+        studyChapterStats = {};
+        await refreshChapter(chapterRef.id);
+        showToast(`✅ Chapter created — ${res.data.pageCount} page(s), ${res.data.movedQuestionCount} question(s) moved in.`);
+      } catch (e2) {
+        console.error(e2);
+        showToast('⚠️ Chapter created, but moving the pages failed: ' + (e2.message || 'unknown error') + ' You can retry from Scanned Pages.');
+      }
+    } else {
+      showToast('✅ Chapter created.');
+    }
   } catch (e) {
     console.error(e); showToast('❌ ' + (e.message || 'Could not create chapter.'));
   } finally {
@@ -509,13 +647,13 @@ function renderChapterHomeView() {
           ${childChapters.map(c => `<option value="${c.id}" ${c.id===studyChapterId?'selected':''}>${esc(c.title)}</option>`).join('')}
         </select>
       ` : ''}
-      ${isAdmin && studyMode === 'parent' ? `<button class="btn btn-secondary btn-sm" onclick="studyView='newChapter'; renderApp();">+ New Chapter</button>` : ''}
+      ${isAdmin && studyMode === 'parent' ? `<button class="btn btn-secondary btn-sm" onclick="openNewChapterView()">+ New Chapter</button>` : ''}
     </div>`;
 
   if (!chapter) {
     return `<div class="card" style="padding:20px;max-width:760px">${header}
       <p style="color:#888">${isAdmin ? 'No chapters yet — create one and upload some pages to get started.' : 'No chapter has been set up yet — ask a parent to add material.'}</p>
-      ${isAdmin ? `<button class="btn" onclick="studyView='newChapter'; renderApp();">+ New Chapter</button>` : ''}
+      ${isAdmin ? `<button class="btn" onclick="openNewChapterView()">+ New Chapter</button>` : ''}
     </div>`;
   }
 
@@ -716,6 +854,10 @@ function renderPagesView() {
             <div style="font-weight:600;font-size:.85rem">${esc(p.topic || 'Untitled')}</div>
             ${p.chapter ? `<div style="color:#999;font-size:.75rem">${esc(p.chapter)}</div>` : ''}
             <button class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%" onclick="openPageFullSize('${p.path.replace(/'/g,"\\'")}')">Open full size ↗</button>
+            ${canEdit() && studyChapters.some(c => c.childId === studyChildId && c.id !== studyChapterId) ? `<select style="margin-top:6px;width:100%;padding:5px;border-radius:6px;border:1px solid #ddd;font-size:.8rem" onchange="movePageToChapter('${p.path.replace(/'/g,"\\'")}', this.value); this.value=''">
+              <option value="">Move to chapter…</option>
+              ${studyChapters.filter(c => c.childId === studyChildId && c.id !== studyChapterId).map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}
+            </select>` : ''}
             ${canEdit() ? `<button class="btn btn-sm" style="margin-top:6px;width:100%;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="deleteScannedPage('${p.path.replace(/'/g,"\\'")}')">🗑️ Delete page${p.questionCount ? ` (${p.questionCount}q)` : ''}</button>` : ''}
           </div>
         </div>`;
@@ -730,6 +872,26 @@ async function openPageFullSize(path) {
     window.open(url, '_blank', 'noopener');
   } catch (e) {
     showToast('⚠️ Could not open page.');
+  }
+}
+
+async function movePageToChapter(path, targetChapterId) {
+  if (!canEdit() || !targetChapterId) return;
+  const target = getStudyChapter(targetChapterId);
+  const page = studyPages.find(p => p.path === path);
+  if (!confirm(`Move this page${page && page.questionCount ? ` and its ${page.questionCount} question(s)` : ''} to "${target ? target.title : 'that chapter'}"? Skill tags from this chapter will be cleared.`)) return;
+  studyBusy = true; renderApp();
+  try {
+    const res = await fx.httpsCallable('assign_pages_to_chapter')({ chapterId: targetChapterId, pagePaths: [path] });
+    invalidateExamQuestionsCache();
+    studyChapterStats = {};
+    studyPages = studyPages.filter(p => p.path !== path);
+    await refreshChapter(targetChapterId);
+    showToast(`✅ Moved ${res.data.movedQuestionCount} question(s) to ${target ? target.title : 'the chapter'}.`);
+  } catch (e) {
+    console.error(e); showToast('❌ ' + (e.message || 'Could not move page.'));
+  } finally {
+    studyBusy = false; renderApp();
   }
 }
 
