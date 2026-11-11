@@ -55,6 +55,28 @@ var pagePool = [];
 var pagePoolFilter = 'all';
 var pagePoolLoading = false;
 
+// Library pages: uploaded scans that don't have questions yet (status stored /
+// processing / failed). Written by the upload trigger into `scannedPages`;
+// pages that already have questions are derived from examQuestions instead.
+async function loadLibraryPages() {
+  if (!studyChildId) return [];
+  try {
+    const snap = await db.collection('scannedPages').where('childId', '==', studyChildId).get();
+    return snap.docs.map(d => d.data()).filter(p => p.path && p.status !== 'ready').map(p => {
+      const m = p.path.split('/').pop().match(/^(\d{10,})-/);
+      return {
+        uid: ++studyPageUidSeq, path: p.path, topic: '', chapter: '', chapterId: null, subject: '',
+        fileName: p.fileName || p.path.split('/').pop(), pageNumber: p.pageNumber || null, pageCount: p.pageCount || null,
+        questionCount: 0, stored: true, status: p.status || 'stored', error: p.error || '', chapterLabel: '',
+        ts: m ? Number(m[1]) : 0,
+      };
+    }).sort((a, b) => b.ts - a.ts || (a.pageNumber || 0) - (b.pageNumber || 0));
+  } catch (e) {
+    console.warn('Library pages unavailable:', e);
+    return [];
+  }
+}
+
 function buildPagePool(questions) {
   const seen = {};
   questions.forEach(q => {
@@ -85,7 +107,7 @@ async function openNewChapterView() {
   renderApp();
   if (!studyChildId) return;
   try {
-    pagePool = buildPagePool(await getCachedExamQuestions(true));
+    pagePool = buildPagePool(await getCachedExamQuestions(true)).concat(await loadLibraryPages());
   } catch (e) {
     console.error(e); showToast('⚠️ Could not load your uploaded pages.');
   } finally {
@@ -140,8 +162,8 @@ function renderPagePicker() {
         </div>
         <div style="padding:6px 8px;font-size:.75rem">
           <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.fileName)}">${esc(p.fileName)}</div>
-          <div style="color:#888">${p.pageNumber ? `Page ${p.pageNumber}${p.pageCount ? ' of ' + p.pageCount : ''} · ` : ''}${p.questionCount}q</div>
-          <div style="color:#b45309">Now in: ${esc(cur)}</div>
+          <div style="color:#888">${p.pageNumber ? `Page ${p.pageNumber}${p.pageCount ? ' of ' + p.pageCount : ''} · ` : ''}${p.stored ? 'no questions yet' : p.questionCount + 'q'}</div>
+          <div style="color:#b45309">${p.stored ? 'Saved scan — questions made after you create the chapter' : 'Now in: ' + esc(cur)}</div>
         </div>
       </label>`;
   }).join('');
@@ -151,7 +173,7 @@ function renderPagePicker() {
         <div style="font-weight:600">📄 Pages for this chapter <span style="font-weight:400;color:#888">(optional)</span></div>
         <div style="font-size:.85rem;color:#555"><span id="pick-count">${pickedCount}</span> selected</div>
       </div>
-      <p style="color:#777;font-size:.82rem;margin:6px 0 10px">Choose already-uploaded pages to move into this chapter. Their questions go with them; no new AI processing or cost.</p>
+      <p style="color:#777;font-size:.82rem;margin:6px 0 10px">Choose already-uploaded pages for this chapter. Pages that already have questions move over at no cost; saved scans without questions are turned into questions (uses AI credit) once the chapter is created.</p>
       ${pagePoolLoading ? '<p style="color:#999">Loading uploaded pages…</p>' : !pagePool.length ? '<p style="color:#999">No uploaded pages yet for this child.</p>' : `
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
           <select style="padding:6px 8px;border-radius:8px;border:1px solid #ddd" onchange="setPagePoolFilter(this.value)">
@@ -308,6 +330,7 @@ async function createChapter() {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
   if (!d.title.trim()) { showToast('⚠️ Give the chapter a title.'); return; }
   const pickedPaths = Object.keys(newChapterPickedPages);
+  const pool = pagePool.slice();
   let bookId = d.bookId;
   if (bookId === '__new__') {
     if (!d.newBookName.trim()) { showToast('⚠️ Give the new book a name.'); return; }
@@ -347,11 +370,21 @@ async function createChapter() {
     newChapterPickedPages = {};
     if (pickedPaths.length) {
       try {
-        const res = await fx.httpsCallable('assign_pages_to_chapter')({ chapterId: chapterRef.id, pagePaths: pickedPaths });
+        const storedPaths = pickedPaths.filter(pp => (pool.find(x => x.path === pp) || {}).stored);
+        const movePaths = pickedPaths.filter(pp => !storedPaths.includes(pp));
+        let msg = '✅ Chapter created';
+        if (movePaths.length) {
+          const res = await fx.httpsCallable('assign_pages_to_chapter')({ chapterId: chapterRef.id, pagePaths: movePaths });
+          msg += ` — ${res.data.pageCount} page(s), ${res.data.movedQuestionCount} question(s) moved in`;
+        }
         invalidateExamQuestionsCache();
         studyChapterStats = {};
         await refreshChapter(chapterRef.id);
-        showToast(`✅ Chapter created — ${res.data.pageCount} page(s), ${res.data.movedQuestionCount} question(s) moved in.`);
+        showToast(msg + '.');
+        if (storedPaths.length) {
+          // Make questions from the saved scans (own confirm + progress).
+          await runMakeQuestions(storedPaths, chapterRef.id, true);
+        }
       } catch (e2) {
         console.error(e2);
         showToast('⚠️ Chapter created, but moving the pages failed: ' + (e2.message || 'unknown error') + ' You can retry from Scanned Pages.');
@@ -774,21 +807,10 @@ function renderUploadView() {
     <h2>📷 Materials${chapter ? ` — ${esc(chapter.title)}` : ''}</h2>
 
     ${canEdit() ? (chapter ? `
-      <div style="margin:14px 0;display:flex;gap:10px;flex-wrap:wrap">
-        <label style="flex:1;min-width:220px;border:2px solid ${studyUploadMode==='generate' ? '#3b82f6' : '#e2e8f0'};border-radius:10px;padding:12px;cursor:pointer;background:${studyUploadMode==='generate' ? '#eef6ff' : '#fff'}">
-          <input type="radio" name="study-upload-mode" value="generate" ${studyUploadMode==='generate'?'checked':''} onchange="studyUploadMode='generate'; renderApp();" style="margin-right:6px">
-          <strong>✨ Generate new questions</strong>
-          <div style="color:#777;font-size:.8rem;margin-top:4px">AI reads the page and writes its own practice questions testing the content.</div>
-        </label>
-        <label style="flex:1;min-width:220px;border:2px solid ${studyUploadMode==='transcribe' ? '#3b82f6' : '#e2e8f0'};border-radius:10px;padding:12px;cursor:pointer;background:${studyUploadMode==='transcribe' ? '#eef6ff' : '#fff'}">
-          <input type="radio" name="study-upload-mode" value="transcribe" ${studyUploadMode==='transcribe'?'checked':''} onchange="studyUploadMode='transcribe'; renderApp();" style="margin-right:6px">
-          <strong>📝 Transcribe as written</strong>
-          <div style="color:#777;font-size:.8rem;margin-top:4px">Keeps the exact existing questions (e.g. CML tests). Pulls the answer from an answer key on the page when it finds one.</div>
-        </label>
-      </div>
+      <p style="color:#555;font-size:.88rem;margin:12px 0">Upload your scans first. They are saved in your library without any AI cost. When you're ready, open <b>Scanned Pages</b>, tick the pages you want and choose <b>Make questions</b>.</p>
       <input id="study-file-input" type="file" multiple style="display:none" onchange="handleStudyFilesUpload(this)">
       <button class="btn" onclick="document.getElementById('study-file-input').click()" ${studyBusy?'disabled':''}>
-        ${studyBusy ? '⏳ Uploading…' : (studyUploadMode==='transcribe' ? '📷 Upload Pages & Transcribe Questions' : '📷 Upload Pages & Generate Questions')}
+        ${studyBusy ? '⏳ Uploading…' : '📷 Upload Pages to Library'}
       </button>
     ` : `<p style="color:#999">Pick a chapter from the home screen first.</p>`) : `<p style="color:#999">Only an admin can upload new pages.</p>`}
 
@@ -856,7 +878,7 @@ async function openPageGallery(tab) {
     const all = await getCachedExamQuestions(true);
     const byTopic = (a, b) => (a.topic || '').localeCompare(b.topic || '') || (a.pageNumber || 0) - (b.pageNumber || 0);
     studyPages = groupPages(all.filter(q => q.chapterId === studyChapterId)).sort(byTopic);
-    studyUnassignedPages = groupPages(all.filter(q => !q.chapterId)).sort(byTopic);
+    studyUnassignedPages = groupPages(all.filter(q => !q.chapterId)).sort(byTopic).concat(await loadLibraryPages());
     studyOtherPages = groupPages(all.filter(q => q.chapterId && q.chapterId !== studyChapterId))
       .sort((a, b) => (a.chapter || '').localeCompare(b.chapter || '') || byTopic(a, b));
   } catch (e) {
@@ -914,12 +936,13 @@ function renderPageCard(p) {
         ${canEdit() ? `<input type="checkbox" ${checked ? 'checked' : ''} onchange="togglePageSel('${safePath}', this)" style="position:absolute;top:8px;left:8px;width:18px;height:18px">` : ''}
       </div>
       <div style="padding:8px">
-        <div style="font-weight:600;font-size:.85rem">${esc(p.topic || 'Untitled')}</div>
-        <div style="color:#999;font-size:.75rem">${p.fileName ? esc(p.fileName) + ' · ' : ''}${p.pageNumber ? `Page ${p.pageNumber}${p.pageCount ? ' of ' + p.pageCount : ''} · ` : ''}${p.questionCount}q</div>
-        <div style="color:#b45309;font-size:.75rem">In: ${esc(where)}</div>
+        <div style="font-weight:600;font-size:.85rem">${p.stored ? (p.status === 'failed' ? '⚠️ Could not make questions' : p.status === 'processing' ? '⏳ Making questions…' : '📥 Saved — no questions yet') : esc(p.topic || 'Untitled')}</div>
+        <div style="color:#999;font-size:.75rem">${p.fileName ? esc(p.fileName) + ' · ' : ''}${p.pageNumber ? `Page ${p.pageNumber}${p.pageCount ? ' of ' + p.pageCount : ''} · ` : ''}${p.stored ? '0q' : p.questionCount + 'q'}</div>
+        ${p.stored && p.error ? `<div style="color:#b91c1c;font-size:.72rem">${esc(p.error.slice(0, 120))}</div>` : ''}
+        <div style="color:#b45309;font-size:.75rem">${p.stored ? 'In library' : 'In: ' + esc(where)}</div>
         <button class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%" onclick="openPageFullSize('${safePath}')">Open full size ↗</button>
         ${canEdit() && targets.length ? `<select style="margin-top:6px;width:100%;padding:5px;border-radius:6px;border:1px solid #ddd;font-size:.8rem" onchange="movePageToChapter('${safePath}', this.value); this.value=''">
-          <option value="">${p.chapterId ? 'Move to chapter…' : 'Assign to chapter…'}</option>
+          <option value="">${p.stored ? 'Make questions in…' : p.chapterId ? 'Move to chapter…' : 'Assign to chapter…'}</option>
           ${targets.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}
         </select>` : ''}
         ${canEdit() ? `<button class="btn btn-sm" style="margin-top:6px;width:100%;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="deleteScannedPage('${safePath}')">🗑️ Delete page${p.questionCount ? ` (${p.questionCount}q)` : ''}</button>` : ''}
@@ -934,7 +957,7 @@ function renderPagesView() {
   const tabBtn = (id, label, n) => `<button class="btn ${studyPagesTab === id ? '' : 'btn-secondary'} btn-sm" onclick="setPagesTab('${id}')">${label} (${n})</button>`;
   const helper = {
     chapter: 'Pages whose questions belong to this chapter.',
-    unassigned: 'Pages (and their questions) that are not assigned to any chapter yet. Assign them to a chapter below.',
+    unassigned: 'Your library: scans that are not in any chapter yet. Pages marked "no questions yet" are saved but not read by AI. Tick the ones you want and choose Make questions.',
     other: 'Pages currently sitting in a different chapter. Tick the ones that belong in this chapter and move them in.',
   }[studyPagesTab];
   const empty = {
@@ -968,7 +991,14 @@ function renderPagesView() {
         <option value="">Move selected to…</option>
         ${bulkTargets.map(c => `<option value="${c.id}" ${studyPagesTab !== 'chapter' && c.id === studyChapterId ? 'selected' : ''}>${esc(c.title)}${c.id === studyChapterId ? ' (this chapter)' : ''}</option>`).join('')}
       </select>
-      <button class="btn btn-sm" onclick="moveSelectedPages()" ${studyBusy ? 'disabled' : ''}>${studyBusy ? '⏳ Moving…' : 'Move'}</button>
+      <button class="btn btn-sm" onclick="moveSelectedPages()" ${studyBusy ? 'disabled' : ''}>${studyBusy ? '⏳ Working…' : 'Move'}</button>
+      ${studyPagesTab === 'unassigned' && list.some(p => p.stored) && chapter ? `
+      <span style="flex-basis:100%;height:0"></span>
+      <select style="padding:6px 8px;border-radius:8px;border:1px solid #ddd" onchange="studyUploadMode=this.value">
+        <option value="generate" ${studyUploadMode === 'generate' ? 'selected' : ''}>✨ Write new questions from the page</option>
+        <option value="transcribe" ${studyUploadMode === 'transcribe' ? 'selected' : ''}>📝 Keep questions exactly as printed</option>
+      </select>
+      <button class="btn btn-sm" onclick="makeQuestionsFromSelected()" ${studyBusy ? 'disabled' : ''}>✨ Make questions in ${esc(chapter.title)}</button>` : ''}
     </div>` : ''}
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px;margin-top:14px">
       ${list.map(renderPageCard).join('') || `<p style="color:#999">${empty}</p>`}
@@ -985,9 +1015,52 @@ async function openPageFullSize(path) {
   }
 }
 
+function isStoredPage(path) {
+  return [...studyPages, ...studyUnassignedPages, ...studyOtherPages].some(p => p.path === path && p.stored);
+}
 async function movePageToChapter(path, targetChapterId) {
   if (!targetChapterId) return;
+  if (isStoredPage(path)) { await runMakeQuestions([path], targetChapterId); return; }
   await runMovePages([path], targetChapterId);
+}
+async function makeQuestionsFromSelected() {
+  const paths = Object.keys(studyPagesSelected).filter(isStoredPage);
+  if (!paths.length) { showToast('⚠️ Tick at least one saved page marked "no questions yet".'); return; }
+  await runMakeQuestions(paths, studyChapterId);
+}
+// Turns saved scans into questions inside a chapter, a few pages per request.
+async function runMakeQuestions(paths, chapterId, skipConfirm) {
+  if (!canEdit() || !paths.length) return;
+  const target = getStudyChapter(chapterId);
+  const mode = studyUploadMode === 'transcribe' ? 'transcribe' : 'generate';
+  if (!skipConfirm && !confirm(`Make questions from ${paths.length} page(s) in "${target ? target.title : 'this chapter'}"? The AI will ${mode === 'transcribe' ? 'copy the questions exactly as printed' : 'write new questions from each page'}. This uses AI credit.`)) return;
+  studyBusy = true; renderApp();
+  const call = fx.httpsCallable('make_questions_from_pages', { timeout: 540000 });
+  let ready = 0, questions = 0; const problems = [];
+  try {
+    for (let i = 0; i < paths.length; i += 6) {
+      const chunk = paths.slice(i, i + 6);
+      showToast(`⏳ Making questions… ${Math.min(i, paths.length)} of ${paths.length} pages done`);
+      try {
+        const res = await call({ chapterId, pagePaths: chunk, mode });
+        (res.data.results || []).forEach(r => {
+          if (r.status === 'ready') { ready++; questions += r.questionCount || 0; }
+          else problems.push((r.path.split('/').pop() || r.path).replace(/^\d{10,}-[a-z0-9]+-/, '') + ': ' + (r.error || r.status));
+        });
+      } catch (e) {
+        console.error(e);
+        problems.push(`${chunk.length} page(s): ${e.message || 'request failed'}`);
+      }
+    }
+    invalidateExamQuestionsCache();
+    studyChapterStats = {};
+    await refreshChapter(chapterId);
+    showToast(`✅ ${ready} page(s) turned into ${questions} question(s).${problems.length ? ' ' + problems.length + ' problem(s) — see the pages for details.' : ''}`);
+    if (problems.length) alert('Some pages could not be processed:\n\n' + problems.slice(0, 8).join('\n'));
+  } finally {
+    studyBusy = false;
+  }
+  await openPageGallery(studyView === 'pages' ? studyPagesTab : 'chapter');
 }
 async function moveSelectedPages() {
   const paths = Object.keys(studyPagesSelected);
@@ -995,6 +1068,8 @@ async function moveSelectedPages() {
   const target = sel ? sel.value : '';
   if (!paths.length) { showToast('⚠️ Tick at least one page first.'); return; }
   if (!target) { showToast('⚠️ Choose which chapter to move them to.'); return; }
+  const stored = paths.filter(isStoredPage);
+  if (stored.length) { await runMakeQuestions(stored, target); return; }
   await runMovePages(paths, target);
 }
 async function runMovePages(paths, targetChapterId) {
@@ -1018,6 +1093,13 @@ async function runMovePages(paths, targetChapterId) {
   await openPageGallery(studyPagesTab); // reload lists + counts
 }
 
+async function deleteLibraryDoc(path) {
+  try {
+    const snap = await db.collection('scannedPages').where('path', '==', path).get();
+    await Promise.all(snap.docs.map(d => d.ref.delete()));
+  } catch (e) { /* library record is best-effort */ }
+}
+
 async function deleteScannedPage(path) {
   if (!canEdit()) return;
   const page = [...studyPages, ...studyUnassignedPages, ...studyOtherPages].find(p => p.path === path);
@@ -1038,6 +1120,7 @@ async function deleteScannedPage(path) {
     await Promise.all([
       ...related.filter(q => q.croppedImage).map(q => storage.ref().child(q.croppedImage).delete().catch(() => {})),
       storage.ref().child(path).delete().catch(() => {}),
+      deleteLibraryDoc(path),
     ]);
     invalidateExamQuestionsCache();
     studyPages = studyPages.filter(p => p.path !== path);
@@ -1077,51 +1160,27 @@ async function handleStudyFilesUpload(input) {
   if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
   if (!studyChapterId) { showToast('⚠️ Pick or create a chapter first.'); return; }
 
-  const chapterObj = getStudyChapter(studyChapterId);
-  const bookObj = chapterObj ? getStudyBook(chapterObj.bookId) : null;
-  const chapter = chapterObj ? chapterObj.title : '';
-  const subjectHint = bookObj ? bookObj.subject : '';
-
   studyBusy = true; renderApp();
   try {
-    const batchRef = db.collection('uploadBatches').doc();
-    await batchRef.set({
-      childId: studyChildId,
-      chapter,
-      chapterId: studyChapterId,
-      bookId: chapterObj ? chapterObj.bookId : null,
-      totalPages: files.length,
-      processedPages: 0,
-      failedPages: 0,
-      questionsGenerated: 0,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
-    watchUploadBatch(batchRef.id, studyChapterId);
-
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const path = `examPages/${studyChildId}/${Date.now()}-${Math.random().toString(36).slice(2)}-${file.name}`;
       await storage.ref().child(path).put(file, {
         customMetadata: {
           childId: studyChildId,
-          subjectHint,
-          chapter,
-          chapterId: studyChapterId,
-          bookId: chapterObj ? chapterObj.bookId : '',
-          batchId: batchRef.id,
+          deferParse: '1', // library-first: store only, make questions later
           uploadedBy: currentUser ? currentUser.uid : '',
-          // Lets each generated question point back to exactly which upload
-          // this came from, so a parent/student can trace it to the
-          // original page -- shown as "Page N of M" during review.
           pageIndex: String(i + 1),
           pageCount: String(files.length),
           fileName: file.name,
-          mode: studyUploadMode,
         },
       });
     }
-    showToast(`📤 Uploaded ${files.length} page(s). ${studyUploadMode==='transcribe' ? 'Transcribing' : 'Generating'} questions in the background — this can take a few minutes.`);
     input.value = '';
+    showToast(`📤 Saved ${files.length} page(s) to your library.`);
+    studyBusy = false;
+    // The library record is written by a background function a moment after upload.
+    setTimeout(() => { openPageGallery('unassigned'); }, 3500);
   } catch (e) {
     console.error(e);
     showToast('❌ ' + (e.message || 'Upload failed.'));

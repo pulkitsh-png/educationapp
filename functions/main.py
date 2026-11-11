@@ -144,49 +144,12 @@ def _require_admin(db, req: https_fn.CallableRequest):
         raise https_fn.HttpsError(https_fn.FunctionsErrorCode.PERMISSION_DENIED, "Parent/admin access required.")
 
 
-@storage_fn.on_object_finalized(
-    secrets=[GEMINI_API_KEY],
-    timeout_sec=180,
-    region="us-east1",
-    memory=options.MemoryOption.MB_512,
-)
-def process_exam_page(event: storage_fn.CloudEvent) -> None:
-    """Fires automatically whenever a file is uploaded under examPages/.
-    Reads the scanned page, asks Gemini to generate practice questions (each
-    tagged with a provisional skill name), and writes them to Firestore in
-    the background. If the upload is tied to a chapter, also folds any new
-    skill names into that chapter's skillSuggestions list for the parent to
-    review on the Chapter Setup screen."""
-    data = event.data
-    storage_path = data.name
-    if not storage_path or not storage_path.startswith("examPages/"):
-        return  # not a page upload we care about
-
-    parts = storage_path.split("/")
-    if len(parts) < 3:
-        return
-    # Cropped figures are written back under examPages/{childId}/crops/ by this
-    # very function. Without this guard each crop re-triggers the function,
-    # which generates questions from the crop and saves more crops -- an
-    # endless (and Gemini-credit-burning) loop.
-    if "crops" in parts[2:-1]:
-        return
-    child_id = parts[1]
-
-    metadata = data.metadata or {}
-    subject_hint = metadata.get("subjectHint", "")
-    chapter = metadata.get("chapter", "")
-    chapter_id = metadata.get("chapterId") or None
-    book_id = metadata.get("bookId") or None
-    batch_id = metadata.get("batchId")
-    uploaded_by = metadata.get("uploadedBy", "")
-    page_index = metadata.get("pageIndex")
-    page_count = metadata.get("pageCount")
-    source_file_name = metadata.get("fileName", "")
-    mode = metadata.get("mode") or "generate"  # 'generate' (default) or 'transcribe'
-
-    db = get_db()
-
+def _generate_for_page(db, bucket_name, content_type, storage_path, child_id, subject_hint, chapter,
+                       chapter_id, book_id, batch_id, uploaded_by, page_index, page_count,
+                       source_file_name, mode):
+    """Reads one stored page, asks Gemini for questions, writes them to Firestore.
+    Shared by the upload trigger (legacy auto-parse) and make_questions_from_pages
+    (on-demand). Returns (ok, questionCount, errorText)."""
     # Pull the chapter's existing skill vocabulary (confirmed skills + any
     # suggestions not yet reviewed) so this page's Gemini call reuses the
     # same names instead of inventing its own phrasing in isolation -- the
@@ -206,9 +169,9 @@ def process_exam_page(event: storage_fn.CloudEvent) -> None:
             existing_skill_names = []  # best-effort only -- never block generation on this
 
     try:
-        blob = storage.bucket(data.bucket).blob(storage_path)
+        blob = storage.bucket(bucket_name).blob(storage_path)
         file_bytes = blob.download_as_bytes()
-        mime_type = data.content_type or _guess_mime_type(storage_path)
+        mime_type = content_type or _guess_mime_type(storage_path)
 
         client = genai.Client(api_key=GEMINI_API_KEY.value)
 
@@ -272,7 +235,7 @@ Return ONLY valid JSON, no markdown fences, no commentary:
         parsed = json.loads(raw)
     except Exception as e:
         _mark_batch_failed(db, batch_id, storage_path, f"{type(e).__name__}: {e}")
-        return
+        return False, 0, f"{type(e).__name__}: {e}"
 
     try:
         batch = db.batch()
@@ -304,7 +267,7 @@ Return ONLY valid JSON, no markdown fences, no commentary:
                 if cropped_bytes:
                     candidate_path = f"examPages/{child_id}/crops/{ref.id}.jpg"
                     try:
-                        storage.bucket(data.bucket).blob(candidate_path).upload_from_string(
+                        storage.bucket(bucket_name).blob(candidate_path).upload_from_string(
                             cropped_bytes, content_type="image/jpeg"
                         )
                         cropped_image_path = candidate_path
@@ -351,6 +314,81 @@ Return ONLY valid JSON, no markdown fences, no commentary:
             })
     except Exception as e:
         _mark_batch_failed(db, batch_id, storage_path, f"write failed: {type(e).__name__}: {e}")
+        return False, 0, f"write failed: {type(e).__name__}: {e}"
+    return True, count, ""
+
+
+def _page_doc_id(storage_path):
+    import hashlib
+    return hashlib.sha1(storage_path.encode()).hexdigest()
+
+
+@storage_fn.on_object_finalized(
+    secrets=[GEMINI_API_KEY],
+    timeout_sec=180,
+    region="us-east1",
+    memory=options.MemoryOption.MB_512,
+)
+def process_exam_page(event: storage_fn.CloudEvent) -> None:
+    """Fires automatically whenever a file is uploaded under examPages/.
+    Reads the scanned page, asks Gemini to generate practice questions (each
+    tagged with a provisional skill name), and writes them to Firestore in
+    the background. If the upload is tied to a chapter, also folds any new
+    skill names into that chapter's skillSuggestions list for the parent to
+    review on the Chapter Setup screen."""
+    data = event.data
+    storage_path = data.name
+    if not storage_path or not storage_path.startswith("examPages/"):
+        return  # not a page upload we care about
+
+    parts = storage_path.split("/")
+    if len(parts) < 3:
+        return
+    # Cropped figures are written back under examPages/{childId}/crops/ by this
+    # very function. Without this guard each crop re-triggers the function,
+    # which generates questions from the crop and saves more crops -- an
+    # endless (and Gemini-credit-burning) loop.
+    if "crops" in parts[2:-1]:
+        return
+    child_id = parts[1]
+
+    metadata = data.metadata or {}
+    subject_hint = metadata.get("subjectHint", "")
+    chapter = metadata.get("chapter", "")
+    chapter_id = metadata.get("chapterId") or None
+    book_id = metadata.get("bookId") or None
+    batch_id = metadata.get("batchId")
+    uploaded_by = metadata.get("uploadedBy", "")
+    page_index = metadata.get("pageIndex")
+    page_count = metadata.get("pageCount")
+    source_file_name = metadata.get("fileName", "")
+    mode = metadata.get("mode") or "generate"  # 'generate' (default) or 'transcribe'
+
+    db = get_db()
+
+    # Library-first uploads: just register the page. Questions are made later,
+    # on demand, by make_questions_from_pages (no Gemini call, no cost here).
+    if metadata.get("deferParse") == "1":
+        try:
+            db.collection("scannedPages").document(_page_doc_id(storage_path)).set({
+                "childId": child_id,
+                "path": storage_path,
+                "fileName": source_file_name or parts[-1],
+                "pageNumber": int(page_index) if page_index and str(page_index).isdigit() else None,
+                "pageCount": int(page_count) if page_count and str(page_count).isdigit() else None,
+                "status": "stored",
+                "chapterId": None,
+                "questionCount": 0,
+                "uploadedBy": uploaded_by,
+                "createdAt": firestore.SERVER_TIMESTAMP,
+            })
+        except Exception:
+            pass
+        return
+
+    _generate_for_page(db, data.bucket, data.content_type, storage_path, child_id, subject_hint, chapter,
+                       chapter_id, book_id, batch_id, uploaded_by, page_index, page_count,
+                       source_file_name, mode)
 
 
 @https_fn.on_call(timeout_sec=60)
@@ -493,6 +531,64 @@ def assign_pages_to_chapter(req: https_fn.CallableRequest):
         chapter_ref.update({"skillSuggestions": firestore.ArrayUnion(sorted(unmatched_skill_names))})
 
     return {"movedQuestionCount": moved, "pageCount": len(pages_found)}
+
+
+@https_fn.on_call(secrets=[GEMINI_API_KEY], timeout_sec=540, memory=options.MemoryOption.GB_1)
+def make_questions_from_pages(req: https_fn.CallableRequest):
+    """Library-first flow: pages are uploaded and stored with no questions.
+    When the parent decides, this turns the chosen stored pages into questions
+    inside a chapter (mode 'generate' or 'transcribe'). Pages that already have
+    questions are skipped -- use assign_pages_to_chapter to move those."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    db = get_db()
+    _require_admin(db, req)
+
+    chapter_id = req.data.get("chapterId")
+    mode = req.data.get("mode") if req.data.get("mode") in ("generate", "transcribe") else "generate"
+    page_paths = [p for p in dict.fromkeys(req.data.get("pagePaths") or []) if isinstance(p, str) and p]
+    if not chapter_id or not page_paths:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, "chapterId and at least one page are required.")
+    if len(page_paths) > 8:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, "Send at most 8 pages per request.")
+
+    chapter_snap = db.collection("chapters").document(chapter_id).get()
+    if not chapter_snap.exists:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.NOT_FOUND, "Chapter not found.")
+    chapter = chapter_snap.to_dict()
+    child_id = chapter.get("childId")
+    book_id = chapter.get("bookId")
+    book_snap = db.collection("books").document(book_id).get() if book_id else None
+    subject_hint = (book_snap.to_dict().get("subject", "") if book_snap is not None and book_snap.exists else "")
+    bucket_name = storage.bucket().name
+
+    def work(path):
+        # Pages can only be used for their own child.
+        if not path.startswith(f"examPages/{child_id}/") or "/crops/" in path:
+            return {"path": path, "status": "skipped", "error": "Page does not belong to this child."}
+        page_ref = db.collection("scannedPages").document(_page_doc_id(path))
+        snap = page_ref.get()
+        page = snap.to_dict() if snap.exists else {}
+        if page.get("status") == "ready":
+            return {"path": path, "status": "skipped", "error": "Already has questions."}
+        existing = list(db.collection("examQuestions").where("sourceImage", "==", path).limit(1).stream())
+        if existing:
+            return {"path": path, "status": "skipped", "error": "Already has questions -- move it instead."}
+        page_ref.set({"childId": child_id, "path": path, "status": "processing"}, merge=True)
+        ok, count, err = _generate_for_page(
+            db, bucket_name, _guess_mime_type(path), path, child_id, subject_hint, chapter.get("title", ""),
+            chapter_id, book_id, None, req.auth.uid, str(page.get("pageNumber") or ""), str(page.get("pageCount") or ""),
+            page.get("fileName") or path.split("/")[-1], mode,
+        )
+        if ok:
+            page_ref.set({"status": "ready", "chapterId": chapter_id, "questionCount": count, "error": ""}, merge=True)
+            return {"path": path, "status": "ready", "questionCount": count}
+        page_ref.set({"status": "failed", "error": err[:300]}, merge=True)
+        return {"path": path, "status": "failed", "error": err[:300]}
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(work, page_paths))
+    return {"results": results}
 
 
 @https_fn.on_call(timeout_sec=120)

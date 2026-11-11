@@ -109,6 +109,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Library of uploaded scans (written by Cloud Functions only). An admin
+    // can read and delete them; status tracks whether questions were made.
+    match /scannedPages/{id} {
+      allow read: if isAdmin() || ownsChild(resource.data.childId);
+      allow delete: if isAdmin();
+    }
+
     match /uploadBatches/{id} {
       allow read: if isAdmin() || ownsChild(resource.data.childId);
       allow create: if isAdmin();
