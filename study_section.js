@@ -630,6 +630,7 @@ function renderStudyTab() {
     case 'exam':         return renderExamView();
     case 'fullExam':      return renderFullExamView();
     case 'results':      return renderResultsView();
+    case 'history':      return renderHistoryView();
     case 'bank':         return renderBankView();
     case 'pages':        return renderPagesView();
     case 'newChapter':   return renderNewChapterView();
@@ -767,6 +768,13 @@ function renderParentChapterHome(chapter, stats) {
         <button class="btn btn-secondary btn-sm" onclick="startFullLengthTest()" ${studyFullBusy?'disabled':''}>${studyFullBusy ? '⏳ Preparing…' : '🎯 Full-Length Test (45, adaptive)'}</button>
       </div>
     </div>
+
+    <div style="margin-top:16px">
+      <div style="font-weight:700;color:#555;font-size:.8rem;letter-spacing:.03em;margin-bottom:8px">REVIEW</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="openTestHistory()">📈 Test Results &amp; Review</button>
+      </div>
+    </div>
   `;
 }
 
@@ -790,6 +798,7 @@ function renderStudentChapterHome(chapter, stats) {
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise what felt tricky</button>
       <button class="btn btn-secondary" onclick="startFullLengthTest()" ${studyFullBusy?'disabled':''}>${studyFullBusy ? '⏳ Preparing…' : '🎯 Full-Length Test (45 questions)'}</button>
+      <button class="btn btn-secondary" onclick="openTestHistory()">📈 My past tests</button>
     </div>
     <div style="margin-top:10px;color:#aaa;font-size:.78rem">Nothing here is timed — we just quietly record how long each one takes, for your parent to see.</div>
   `;
@@ -1532,6 +1541,7 @@ async function finishFullTest() {
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
   });
 
+  studyResultFromHistory = false;
   studyLastResult = { score, total, sessionId: sessionRef.id, suggestions: null, answers, testType: 'full', weightedScore, highestDifficulty, progression, timeTakenSeconds };
   studyFullPool = null; studyFullCurrentQ = null; studyFullProgression = [];
   studyView = 'results';
@@ -1574,6 +1584,7 @@ async function submitExam() {
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
   });
 
+  studyResultFromHistory = false;
   studyLastResult = { score, total, sessionId: sessionRef.id, suggestions: null, answers, timeTakenSeconds };
   studyView = 'results';
   renderApp();
@@ -1654,11 +1665,96 @@ function renderResultsView() {
         <strong>💡 Suggestions for next time:</strong>
         <ul style="margin:8px 0 0 18px">${r.suggestions.map(s => `<li style="margin-bottom:4px">${esc(s)}</li>`).join('')}</ul>
       </div>
-    ` : `<p style="color:#888;margin-top:14px">⏳ Generating improvement suggestions…</p>`}
+    ` : (r.suggestions === false ? '' : `<p style="color:#888;margin-top:14px">⏳ Generating improvement suggestions…</p>`)}
 
-    <div style="display:flex;gap:10px;margin-top:18px">
-      <button class="btn" onclick="studyView='home'; renderApp();">Done</button>
+    <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+      <button class="btn" onclick="${studyResultFromHistory ? "studyView='history'" : "studyView='home'"}; renderApp();">${studyResultFromHistory ? '← Back to all results' : 'Done'}</button>
       <button class="btn btn-secondary" onclick="startRevisionExam()">🔁 Revise These Skills</button>
+      ${studyResultFromHistory ? '' : `<button class="btn btn-secondary" onclick="openTestHistory()">📈 All past results</button>`}
     </div>
+  </div>`;
+}
+
+// ── Test results history (saved examSessions) ────────────────────────────
+// Every finished test is already saved to examSessions; this lists them so a
+// parent/student can reopen any one and review the missed questions.
+var studyResultFromHistory = false;
+var studyHistory = [];
+var studyHistoryLoading = false;
+var studyHistoryError = null;
+var studyHistoryScope = 'chapter'; // 'chapter' | 'all'
+
+async function openTestHistory() {
+  if (!studyChildId) { showToast('⚠️ Pick a child first.'); return; }
+  studyResultFromHistory = false;
+  studyView = 'history';
+  studyHistoryLoading = true; studyHistoryError = null;
+  renderApp();
+  try {
+    const snap = await db.collection('examSessions').where('childId', '==', studyChildId).get();
+    studyHistory = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => ((b.createdAt && b.createdAt.seconds) || 0) - ((a.createdAt && a.createdAt.seconds) || 0));
+  } catch (e) {
+    console.error('openTestHistory failed:', e);
+    studyHistoryError = (e && (e.code || e.message)) || 'unknown error';
+  } finally {
+    studyHistoryLoading = false;
+    if (studyView === 'history') renderApp();
+  }
+}
+function setHistoryScope(v) { studyHistoryScope = v; renderApp(); }
+
+function openPastResult(id) {
+  const x = studyHistory.find(h => h.id === id);
+  if (!x) return;
+  studyLastResult = {
+    score: x.score || 0, total: x.total || (x.answers || []).length, sessionId: x.id,
+    suggestions: (x.suggestions && x.suggestions.length) ? x.suggestions : false, answers: x.answers || [],
+    testType: x.testType || null, weightedScore: x.weightedScore, highestDifficulty: x.highestDifficulty,
+    progression: x.progression || [], timeTakenSeconds: x.timeTakenSeconds != null ? x.timeTakenSeconds : null,
+  };
+  studyResultFromHistory = true;
+  studyView = 'results';
+  renderApp();
+  prefetchExamImages(studyLastResult.answers).then(() => { if (studyView === 'results') renderApp(); });
+}
+
+function renderHistoryView() {
+  const fmtDate = ts => ts && ts.seconds ? new Date(ts.seconds * 1000).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Just now';
+  const chapterTitle = id => { const c = id ? getStudyChapter(id) : null; return c ? c.title : '(chapter removed)'; };
+  const list = studyHistory.filter(h => studyHistoryScope === 'all' || h.chapterId === studyChapterId);
+  const chapter = getStudyChapter(studyChapterId);
+  const avg = list.length ? Math.round(list.reduce((n, h) => n + (h.total ? 100 * h.score / h.total : 0), 0) / list.length) : null;
+  const rows = list.map(h => {
+    const pct = h.total ? Math.round(100 * h.score / h.total) : 0;
+    const color = pct >= 80 ? '#2d9e52' : pct >= 60 ? '#b45309' : '#b91c1c';
+    const type = h.testType === 'full' ? '🎯 Full-length' : '📝 Practice';
+    const missed = (h.answers || []).filter(a => !a.correct).length;
+    return `
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px;border:1px solid #eee;border-radius:10px;margin-top:10px;background:#fafafa">
+        <div style="min-width:64px;text-align:center">
+          <div style="font-size:1.3rem;font-weight:700;color:${color}">${pct}%</div>
+          <div style="font-size:.75rem;color:#888">${h.score}/${h.total}</div>
+        </div>
+        <div style="flex:1;min-width:180px">
+          <div style="font-weight:600;font-size:.9rem">${type} · ${esc(chapterTitle(h.chapterId))}</div>
+          <div style="color:#888;font-size:.78rem">${esc(fmtDate(h.createdAt))}${h.timeTakenSeconds != null ? ' · ⏱ ' + formatTimeTaken(h.timeTakenSeconds) : ''} · ${missed} missed</div>
+        </div>
+        <button class="btn btn-sm" onclick="openPastResult('${h.id}')">Review →</button>
+      </div>`;
+  }).join('');
+  return `
+  <div class="card" style="padding:20px;max-width:760px">
+    <button class="btn btn-secondary" onclick="studyView='home'; renderApp();">← Back</button>
+    <h2 style="margin:10px 0 2px">📈 Test Results &amp; Review</h2>
+    <div style="color:#888;font-size:.9rem">Every finished practice test is saved here. Open one to see what was missed and what to study next.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center">
+      <button class="btn ${studyHistoryScope === 'chapter' ? '' : 'btn-secondary'} btn-sm" onclick="setHistoryScope('chapter')">${chapter ? esc(chapter.title) : 'This chapter'}</button>
+      <button class="btn ${studyHistoryScope === 'all' ? '' : 'btn-secondary'} btn-sm" onclick="setHistoryScope('all')">All chapters</button>
+      ${avg !== null ? `<span style="color:#555;font-size:.85rem;margin-left:6px">${list.length} test(s) · average ${avg}%</span>` : ''}
+    </div>
+    ${studyHistoryLoading ? '<p style="color:#999;margin-top:16px">⏳ Loading results…</p>'
+      : studyHistoryError ? `<div style="margin-top:16px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;color:#b91c1c">Couldn't load results (${esc(String(studyHistoryError))}). <button class="btn btn-secondary btn-sm" onclick="openTestHistory()">Retry</button></div>`
+      : (rows || '<p style="color:#999;margin-top:16px">No tests taken yet' + (studyHistoryScope === 'chapter' ? ' in this chapter. Try "All chapters".' : '.') + '</p>')}
   </div>`;
 }
